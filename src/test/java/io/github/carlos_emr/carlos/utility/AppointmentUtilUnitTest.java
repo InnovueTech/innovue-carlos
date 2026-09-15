@@ -22,6 +22,7 @@
 package io.github.carlos_emr.carlos.utility;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -87,7 +88,7 @@ class AppointmentUtilUnitTest extends CarlosUnitTestBase {
         @ParameterizedTest(name = "[{index}] demographicNo={0}")
         @NullSource
         @ValueSource(strings = {
-            "", "   ", "null", "abc", "12a", "1.5", "-1", "0",
+            "", "   ", "null", "NULL", "abc", "12a", "1.5", "-1", "0",
             // Over int range. ConversionUtils.fromIntString() maps these to 0, which would look
             // up whichever patient holds demographic 0 rather than rejecting the input.
             "2147483648", "99999999999"})
@@ -133,6 +134,22 @@ class AppointmentUtilUnitTest extends CarlosUnitTestBase {
             assertThat(AppointmentUtil.getNextAppointment(String.valueOf(DEMOGRAPHIC_NO)))
                 .isEqualTo(NONE);
             assertThat(requestedIds()).containsExactly(DEMOGRAPHIC_NO);
+        }
+
+        /**
+         * A failed lookup must not be reported as "this patient has no next appointment": the
+         * sentinel is indistinguishable from a real empty result, so a database error would be
+         * shown to the clinician as a confident (and wrong) answer.
+         */
+        @Test
+        @DisplayName("should propagate a lookup failure instead of reporting no appointment")
+        void shouldPropagateLookupFailure_whenTheQueryFails() {
+            when(appointmentDao.findNextAppointmentDates(anyCollection()))
+                .thenThrow(new IllegalStateException("lookup failed"));
+
+            assertThatThrownBy(() -> AppointmentUtil.getNextAppointment(String.valueOf(DEMOGRAPHIC_NO)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("lookup failed");
         }
     }
 
