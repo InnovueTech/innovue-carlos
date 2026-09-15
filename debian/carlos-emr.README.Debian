@@ -722,6 +722,90 @@ Which log holds what
   troubleshooting is fine; put it back afterwards, because DEBUG on this
   application can put request parameters — which is to say PHI — into the log.
 
+Schema setup reports that indexes or columns were already present
+  Fresh installs create the baseline schema and then run the same guarded
+  migrations used for upgrades. Some indexes and columns already exist in that
+  baseline. The installer summarizes those successful no-ops in one line:
+
+    schema setup: 7 index(es) and 21 column(s) were already present; kept their existing definitions.
+
+  The counts can differ by schema. This replaces MariaDB's confusing duplicate
+  key-name (1061) and column-name (1060) warning lines. It does not suppress
+  duplicate DATA errors (1062), other warnings or failed SQL statements. A
+  migration that fails still needs investigation; follow its recovery message.
+
+The install "succeeded" but nothing works: no schema, EMR stopped, DrugRef silent
+  `carlos-ctl check` reports "this installation never finished", or the database
+  section says the schema has NO tables. Finish the install:
+
+    sudo carlos-ctl finish-install
+
+  Why this can happen with an apt run that reported no error: every provisioning
+  step in the postinst is deliberately non-fatal. A database that is unreachable
+  must not leave dpkg half-configured, because that would block the other CARLOS
+  packages and anything else in the same transaction. So the failure is reported
+  on stderr, the transaction succeeds, and on a front end that never showed you
+  stderr the install simply looks finished.
+
+  When the state directory is writable, the failed install is recorded in
+  /var/lib/carlos-emr/.install-incomplete. Interactive installers also show a
+  critical debconf error; unattended installers must inspect the command output
+  and run carlos-ctl check. If writing the marker fails, fix the filesystem and
+  run finish-install manually: an automatic boot retry is not assured.
+
+  finish-install returns nonzero if configuration, database settings, accounts,
+  migration, credential replacement or requested demo data fails. It preserves
+  the pending state so you can fix the reported cause and run the same command
+  again. A populated schema that fails validation is NEVER migrated at boot;
+  arrange a verified backup and have the administrator review the Flyway error
+  before running the manual repair. Do not delete clinical databases to retry.
+
+  Check `journalctl -u mariadb` for the database outage's cause. Memory pressure
+  is one possibility, not a diagnosis: `journalctl -k` records kernel OOM kills.
+  An 8 GB allocation alone does not establish why provisioning was interrupted.
+
+  DrugRef is a second webapp in the EMR's Tomcat, so a stopped application server
+  also stops drug lookups. Its dataset is loaded by the separate DrugRef package.
+  If finish-install says that database is empty, run:
+
+    sudo dpkg-reconfigure carlos-emr-drugref
+    sudo carlos-ctl check
+
+  If it reports existing tables WITHOUT _carlos_seed_complete, the dataset may
+  be from an older installation or an interrupted seed. Back it up and ask the
+  administrator to verify it before reloading; reconfigure deliberately leaves
+  populated databases alone. Test a prescribing lookup after recovery.
+
+  A failed seeded-password replacement stops and disables the EMR and leaves a
+  guard that also blocks manual starts. finish-install checks containment and
+  reports an error if it cannot verify it. A successful retry re-enables the
+  service and removes the guard; boot recovery also queues its start.
+
+  That guard is a file under /var/lib/carlos-emr, and disabling a unit does not
+  stop a manual `systemctl start`. So if the guard itself cannot be written —
+  a full or read-only /var — the recovery masks carlos-emr.service instead, and
+  says so: the mask is then the only thing standing between an internet-facing
+  EMR and the administrator password published in the CARLOS source repository.
+  A later successful finish-install unmasks the unit for you. Do not unmask it
+  by hand before that credential has actually been replaced.
+
+  While `carlos-ctl import-o19` is copying an OSCAR 19 database, finish-install
+  refuses and says so; at boot it records that and waits. Nothing is lost —
+  resume the import (`carlos-ctl import-o19 ... --resume`), and the install
+  finishes itself at the next boot.
+
+  Only one provisioning run at a time. The boot-time provisioner, an operator
+  running finish-install, and the package's own configure (an unattended upgrade
+  or a dpkg-reconfigure) all provision with the same commands, and any two of
+  them would otherwise generate an administrator credential each; they share one
+  lock. A second run by hand is refused with a message naming the first — wait
+  for it, then confirm with `carlos-ctl check`. At boot the recovery leaves the
+  work to whoever holds the lock, and a configure that cannot take it — held
+  for five minutes, or a lock file it cannot even open on a read-only or full
+  /var — provisions nothing and records the install as unfinished, so it is
+  completed later rather than racing. A host with no flock(1) provisions as it
+  did before the lock existed.
+
 eForm print, fax or archive fails
   Those three are the only workflows that need a browser, and it runs as its own
   service. Check, in this order:
