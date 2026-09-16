@@ -162,7 +162,8 @@ async function auditRows(context, masterPage, recorder, timeout) {
     // it actually wrote.
     await audit.locator('select[name="auditLog_length"]').first()
       .selectOption('-1', { timeout });
-    return audit.$$eval('#auditLog tbody tr', (rows) => rows
+    // Await before finally closes the popup; returning the promise races close().
+    return await audit.$$eval('#auditLog tbody tr', (rows) => rows
       .map((row) => Array.from(row.querySelectorAll('td'))
         .slice(0, 3)
         .map((cell) => (cell.textContent || '').trim())
@@ -210,6 +211,9 @@ async function main() {
     const landed = masterPage.url().match(/demographic_no=(\d+)/);
     assert(landed, 'Could not determine which patient the Master Record opened');
     [, demographicNo] = landed;
+    assert(demographicNo === String(preferredDemographicNo),
+      'The configured demographic was not returned by search; narrow DEMOGRAPHIC_EDIT_SEARCH '
+      + 'and set DEMOGRAPHIC_EDIT_DEMOGRAPHIC_NO before running this mutating check');
 
     // The audit trail as it stands BEFORE the edit, so the new row can be found
     // by difference rather than by guessing at its timestamp.
@@ -248,7 +252,7 @@ async function main() {
       await input.fill(field.value(marker));
     }
 
-    const save = masterPage.locator('input[value="Update Record"], button:has-text("Update Record")').first();
+    const save = masterPage.locator('#updateButton input[type="submit"]').first();
     assert(await save.count() > 0, 'The edit form offers no "Update Record" control');
     // The database is read back on the very next line, so a wait that returns
     // before the POST has even started would race the write it is meant to
@@ -383,4 +387,4 @@ if (require.main === module) {
   runCheck({ name: 'demographic-edit-update', run: main });
 }
 
-module.exports = { ROUND_TRIP_FIELDS, UNTOUCHED_COLUMN, main, openEditForm, presentFields };
+module.exports = { ROUND_TRIP_FIELDS, UNTOUCHED_COLUMN, main, openEditForm, presentFields, auditRows };

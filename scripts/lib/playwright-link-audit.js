@@ -35,9 +35,9 @@
  */
 
 const {
-  assert, relabelStrictPage, screenshot, withoutQueryStrings, wireStrictPage,
+  assert, assertNotErrorPage, relabelStrictPage, screenshot, withoutQueryStrings, wireStrictPage,
 } = require('./playwright-harness');
-const { clickOpensPopup } = require('./playwright-ui');
+const { clickOpensPopupOrNavigates } = require('./playwright-ui');
 
 const DEFAULT_TIMEOUT = 20000;
 // How long a click is given to START a navigation before the item is treated
@@ -182,6 +182,7 @@ async function catalogueLinks(page, options = {}) {
       // branch, where it waited for a navigation that never came and then read
       // the UNCHANGED host page -- reporting the opener's own content as the
       // item's destination, which passes for every broken popup.
+      hasClickHandler: Boolean(opener),
       opensPopup: /popup|newWindow|postToPopup|window\.open/i.test(opener)
         || (anchor.getAttribute('target') || '').toLowerCase() === '_blank',
     };
@@ -299,17 +300,50 @@ function itemLocator(hostPage, item) {
   return hostPage.locator(item.selector || 'a').nth(item.index);
 }
 
+// Menu entries remain in the DOM when their menu is closed. Reveal them using
+// the same dropdown, tab, collapse or hover controls an operator uses.
+async function revealAuditLink(page, link, timeout) {
+  const controls = await link.evaluate(anchor => {
+    const all = [...document.querySelectorAll('a, button')];
+    const result = [];
+    for (let node = anchor.parentElement; node; node = node.parentElement) {
+      let control;
+      let hover = false;
+      if (node.classList.contains('dropdown-menu') && !node.classList.contains('show')) {
+        control = node.parentElement.querySelector('[data-bs-toggle="dropdown"], [data-toggle="dropdown"]');
+      } else if ((node.classList.contains('collapse') && !node.classList.contains('show'))
+          || (node.classList.contains('tab-pane') && !node.classList.contains('active'))) {
+        control = all.find(el => node.id && (el.getAttribute('data-bs-target') === '#' + node.id
+          || el.getAttribute('href') === '#' + node.id));
+      } else if (node.classList.contains('menu') && node.id.startsWith('menu')) {
+        control = document.getElementById('menuTitle' + node.id.slice(4))?.querySelector('a');
+        hover = true;
+      }
+      const index = all.indexOf(control);
+      if (index >= 0) result.unshift({ index, hover, markup: control.outerHTML });
+    }
+    return result;
+  });
+  for (const { index, hover, markup } of controls) {
+    const control = page.locator('a, button').nth(index);
+    assert(await control.evaluate(element => element.outerHTML) === markup,
+      'The menu changed while revealing an audit item; refusing to click a different control');
+    if (hover) await control.hover({ timeout });
+    else await control.click({ timeout });
+  }
+}
+
 async function openItem(context, hostPage, item, recorder, label, timeout) {
   const link = itemLocator(hostPage, item);
   const stillThere = ((await link.textContent({ timeout }).catch(() => null)) || '').replace(/\s+/g, ' ').trim();
   assert(stillThere === item.text,
     `the page changed under the audit: item ${item.index} was "${item.text}" when catalogued and is "${stillThere}" now`);
-  await link.scrollIntoViewIfNeeded().catch(() => {});
+  await revealAuditLink(hostPage, link, timeout);
+  await link.scrollIntoViewIfNeeded({ timeout }).catch(() => {});
   if (item.opensPopup) {
-    const popup = await clickOpensPopup(hostPage, link, {
-      context, label, recorder, timeout,
+    return clickOpensPopupOrNavigates(hostPage, link, {
+      context, label, recorder, timeout, allowPdf: true,
     });
-    return { page: popup, isPopup: true };
   }
   const before = hostPage.url();
   // ARMED BEFORE THE CLICK. waitForLoadState() asked for after the click
@@ -434,22 +468,42 @@ async function openItem(context, hostPage, item, recorder, label, timeout) {
 async function destinationText(target, inPlaceTarget, timeout) {
   const read = (locator) => locator.innerText({ timeout }).catch(() => '');
   if (target.isPopup || !inPlaceTarget) {
-    return read(target.page.locator('body'));
+    return assertNotErrorPage(target.page, 'audit destination', { allowPdf: true });
   }
   const container = target.page.locator(inPlaceTarget).first();
   if (await container.count().catch(() => 0) === 0) {
-    return read(target.page.locator('body'));
+    // A full navigation can leave the shell. An in-place update (including a
+    // hash change) still requires its panel; shell text is not a destination.
+    if (target.cameFrom) {
+      const before = new URL(target.cameFrom);
+      const after = new URL(target.page.url());
+      before.hash = '';
+      after.hash = '';
+      if (before.href !== after.href) {
+        return assertNotErrorPage(target.page, 'audit destination', { allowPdf: true });
+      }
+    }
+    throw new Error(`Missing required destination container: ${inPlaceTarget}`);
   }
   // An .xlink item renders into an iframe: the container's own innerText is
   // empty because the content lives in another document.
   const frame = container.locator('iframe').first();
   if (await frame.count().catch(() => 0) > 0) {
-    const frameBody = await frame.contentFrame().catch(() => null);
-    if (frameBody) {
-      return read(frameBody.locator('body'));
-    }
+    // Locator.contentFrame() returns a FrameLocator synchronously. The
+    // ElementHandle method is the asynchronous API; calling .catch() here
+    // prevented every iframe-backed administration page from being inspected.
+    return read(frame.contentFrame().locator('body'));
   }
   return read(container);
+}
+
+// A plain link back to the current document (for example its patient-number
+// heading) offers no additional destination. Never count it as tested coverage,
+// and never apply this exemption to an action handler or a popup.
+function isCurrentDocumentLink(item, hostUrl) {
+  if (!item.href || item.hasClickHandler || item.route || item.opensPopup) return false;
+  try { return new URL(item.href, item.baseURI || hostUrl).href === hostUrl; }
+  catch { return false; }
 }
 
 /**
@@ -483,7 +537,7 @@ async function auditCatalogue(options) {
       break;
     }
     const rule = skipRules.find((candidate) => candidate.match.test(item.text));
-    if (rule) {
+    if (rule || isCurrentDocumentLink(item, hostUrl)) {
       skipped += 1;
       continue;
     }
@@ -493,6 +547,7 @@ async function auditCatalogue(options) {
     let target = null;
     try {
       target = await openItem(context, hostPage, item, recorder, label, timeout);
+      target.cameFrom = target.cameFrom || hostUrl;
       const body = await destinationText(target, inPlaceTarget, timeout);
       if (ERROR_PAGE_RE.test(body)) {
         failures.push(`${item.text}: rendered an error page`);
@@ -549,8 +604,8 @@ function assertAuditClean(result, options = {}) {
 }
 
 module.exports = {
-  bodyFingerprint,
-  ERROR_PAGE_RE,
+  bodyFingerprint, destinationText, isCurrentDocumentLink,
+  revealAuditLink, ERROR_PAGE_RE,
   assertAuditClean,
   auditCatalogue,
   catalogueLinks,

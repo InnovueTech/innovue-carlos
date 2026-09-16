@@ -15,7 +15,7 @@ Status values: `open` (verified, no issue filed), `issue-filed`, `fixed`,
 `needs-live-check` (verified statically, wants confirmation against a running
 deployment).
 
-**All findings below are filed as [issue #3665](https://github.com/carlos-emr/carlos/issues/3665)**,
+**Findings 1–9 are filed as [issue #3665](https://github.com/carlos-emr/carlos/issues/3665)**,
 one ticket covering the whole pass. A finding keeps `needs-live-check` where that
 is still true of it — being filed does not make a source-search result a
 confirmed one.
@@ -121,6 +121,51 @@ Recorded so the same candidates are not re-investigated.
 | "`consultationServices` rows ship inactive on Ontario, so the service picker is empty" | Real, but already found (alpha-11 observation 21) and already **fixed** on `release/2026.08` by `V1.0.23__activate_legacy_consultation_services.sql`. |
 
 ---
+
+## 4. Packaged release VM validation (September 2026)
+
+These findings are tracked together in [issue #3682](https://github.com/carlos-emr/carlos/issues/3682).
+The [validation record](release-2026.08-workflow-validation.md) distinguishes
+application defects from test defects and missing fixtures, and records retests.
+
+| # | Defect | Evidence | Status |
+|---|---|---|---|
+| 11 | SOAP interceptor by-type autowiring initializes unrelated request actions during startup | `AuthenticationInterceptorWiringUnitTest` reproduces the original Spring `UnsatisfiedDependencyException`; release VM starts after removing that autowiring from `spring_ws.xml`. | `issue-filed` |
+| 12 | Demographic PDF labels fail and PDF Envelope is missing | Live `demographic-labels` and server journal: label actions return HTTP 500 with Jasper/Jackson rejection of `queryString`; envelope returns HTTP 404. | `issue-filed` |
+| 13 | Fresh-demo Messenger administration/compose fails on NULL clinic locations | Live `messenger`, `messenger-inbox-actions` and surface audit return HTTP 500; three demo rows contain NULL and Hibernate cannot hydrate the primitive `GroupMembers.clinicLocationNo`. Regression fails on the original mapping. | `issue-filed` |
+| 14 | Contact search cannot select a result; quoted names also corrupt its JSON handoff | Live `contact-lifecycle` records `Invalid or unexpected token` on clicking the result. `contactSearch.jsp` JavaScript-encodes a complete handler instead of HTML-encoding its attribute, then concatenates JSON. Executing the original serializer with a quoted name raises `SyntaxError`. | `issue-filed` |
+| 15 | Measurement history omits Plot for populated numeric data | Live `measurement-history` renders both owned WT rows but no Plot control. `DisplayHistory.jsp` tests `data.canPlot` after the `c:forEach` variable has left scope. | `issue-filed` |
+| 16 | Fresh-install prevention pages request an absent optional catalogue and log HTTP 404 | Live `prevention-lifecycle` captures `eform/displayImage?imagefile=vaccine-brands.json` returning 404 before the bundled fallback. A Java regression requires a bundled response when no clinic override exists and preserves override precedence. | `issue-filed` |
+| 17 | Episode editor has validation/authorization gaps requiring a focused follow-up | Source review: `episodeForm.jsp` compares status with `Completed`, but the option is `Complete`; `Episode2Action.edit()` loads an episode without the privilege check present in `list()`. No low-privilege live exploit is claimed by this validation pass. | `needs-live-check` |
+
+
+| 18 | New contact associations submit a blank integer ID and fail Save | Live `contact-lifecycle` selects a result but Save returns 500; `Contact2Action.saveManage()` parses the blank ID. Both contact fragments now initialize new IDs to zero; tracked in #3682. | `issue-filed` |
+| 19 | Native-document and calendar popups request a missing host favicon | Captured browser request to `/favicon.ico` returns 404 while `/carlos/images/favicon.ico` exists. Exact nginx redirect added; tracked in #3682. | `issue-filed` |
+| 20 | Inbox review-status filters lose an HRM result | Live `inboxhub-filters`: `HRM:17` appears under All but none of New/Acknowledged/Filed after real UI form submissions; tracked in #3682. | `issue-filed` |
+| 21 | Chart Row Display has no CSRF input for its AJAX POST | Live `echart-navbar-modules` DOM/source audit: Row Display reads a missing `input[name="CSRF-TOKEN"]`; 14 entries open, 13 are deliberately skipped by read-only policy; tracked in #3682. | `issue-filed` |
+| 22 | Provider preferences contain broken destinations | Live preferences surface: Edit Text Signature returns 500; Set Default Printer throws a null `messageHandler` assignment. An additional Document Description Template aborted request needs further classification; tracked in #3682. | `issue-filed` |
+| 23 | Three anonymous routes return success status with no content | Live `anonymous-access`: DisplayMessages, IncomingConsultation and ViewDocumentReport return HTTP 200 and zero bytes. No data disclosure is established; tracked in #3682. | `issue-filed` |
+| 24 | Scratchpad version operations lack the owner comparison used by save | Source review of `Scratch2Action.showVersion()` and `delete()` versus ordinary save; cross-provider behavior has not been live-validated. Tracked in #3682. | `needs-live-check` |
+
+| 25 | Contact deletion fails for both new and persisted associations | Follow-up review of `Contact2Action.removeContact()`: zero-valued unsaved IDs reach `find(0)`, and casting `ArrayList.toArray()` to `String[]` throws before persisted deletions. Both corrected; added Java regressions and unsaved personal/professional UI steps. Final live retest pending; #3682. | `issue-filed` |
+| 26 | Contact removal lacked write permission and association ownership checks | Review confirmed `removeContact()` checked read access and lacked association ownership validation. Added write permission, required patient context, POST-only save/removal, and validation of every selected owner before any deletion. Added negative Java regressions; packaged live validation pending; #3682. | `needs-live-check` |
+
+| 27 | Contact saves can reassign another patient's association or move a reciprocal row | Review of `saveManage`: existing IDs were loaded without ownership validation and reused for reverse links. Both categories/removals now prevalidate ownership; reciprocal writes require both patients' permission and a distinct reverse row. 30 focused Java cases pass; #3682. | `issue-filed` |
+| 28 | Professional contact consent and active status silently ignore selections | `saveManage` read `contact_` parameters for professional rows. Now uses `procontact_`; regression with opposing personal values passes and UI round-trip is added; #3682. | `issue-filed` |
+| 29 | Contact control IDs collide between personal and professional rows | Personal consent/active fields used the professional ID prefix. Corrected prefixes and accessible labels; live workflow checks uniqueness; #3682. | `issue-filed` |
+| 30 | Measurement Plot handler did not encode the type query parameter | Review found request-derived type embedded directly in the Plot JavaScript string. Now uses URI-component then JavaScript-attribute encoding; #3682. | `issue-filed` |
+
+| 31 | Client Lab Label silently returns an empty PDF response | Final installed-package UI click and response inspection: HTTP 200, `application/pdf;charset=UTF-8`, zero bytes. `PrintClientLabLabel2Action` catches the Jasper `queryString` deserialization exception and returns normally. Open; #3682. | `issue-filed` |
+
+| 32 | Reciprocal contact access checks over-restrict ordinary saves and miss omitted form types | Follow-up review and negative Java cases reproduce unnecessary target-patient denial and an omitted/`01` type bypass. The action now plans authorized reverse writes before mutations; #3682. | `issue-filed` |
+| 33 | Reverse contacts acquire the wrong type and unrequested SDM/emergency flags | An omitted type created a provider association; empty non-null flag parameters enabled both flags. Corrected explicit type and null flag parameters; Java regressions and an existing-relationship UI scenario check these fields; #3682. | `issue-filed` |
+| 34 | Internal patient contact search is unavailable | Live UI probe: Manage Contacts → Add Contact → Internal → Search displays “Demographic search is currently unavailable” instead of opening search; fixture cleanup passes. Source `ManageContacts.jsp` confirms the unconditional return. Open; #3682. | `issue-filed` |
+| 35 | Reciprocal lookup can confuse different contact ID namespaces | `DemographicContactDaoImpl.find(int,int)` filters numeric IDs and deletion, but not category/type; a coincident directory/provider ID can look like a reverse patient relationship. Source confirmed; collision not VM-reproduced; #3682. | `needs-live-check` |
+
+| 36 | Malformed contact-save numbers are parsed before authorization | `Contact2Action.saveManage()` parses `demographic_no` and `contact_num` before its privilege check; malformed values throw `NumberFormatException`. Present in the release base; no mutation precedes authorization. Source confirmed; deployed response not VM-reproduced; #3682. | `needs-live-check` |
+
+| 37 | Crafted contact type changes can reclassify existing relationships | Existing rows now retain persisted types in reciprocal planning and persistence. Five regressions fail before the fix; all 30 contact cases pass afterward. Old installed package fails the owned-request tampering probe; the rebuilt DEB passes normal and twice-tampered saves, with cleanup verified; #3682. | `issue-filed` |
+| 38 | Existing contact category can be changed by submitting the row in the opposite list | `validateContactSaves` validates patient ownership but not the stored personal/professional category; `linkContactToDemographic` assigns the submitted list's category. Source-patient write permission is required; this is a classification-consistency candidate, not a demonstrated authorization bypass. No normal UI path or VM reproduction was established; #3682. | `needs-live-check` |
 
 ## How this list is meant to be used
 

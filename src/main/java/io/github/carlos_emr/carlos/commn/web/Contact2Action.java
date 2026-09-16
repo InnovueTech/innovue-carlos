@@ -36,8 +36,10 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -82,6 +84,13 @@ import io.github.carlos_emr.carlos.utility.LogSafe;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 public class Contact2Action extends ActionSupport {
+    private static final String PERSONAL_CONTACT_PREFIX = "contact_";
+    private static final String PROFESSIONAL_CONTACT_PREFIX = "procontact_";
+    private static final String CONTACT_ID_SUFFIX = ".contactId";
+    private static final String CONTACT_ID_PARAMETER = "contactId";
+    private static final String CONTACT_ROLE_SUFFIX = ".role";
+    private static final String CONTACT_TYPE_SUFFIX = ".type";
+    private static final String CONTACT_NOTE_SUFFIX = ".note";
     HttpServletRequest request = ServletActionContext.getRequest();
     HttpServletResponse response = ServletActionContext.getResponse();
 
@@ -197,6 +206,9 @@ public class Contact2Action extends ActionSupport {
     // FindSecBugs IMPROPER_UNICODE: case-insensitive comparison of an internal/domain value (status/flag/enum/MIME/code); not a security or authorization decision. See docs/static-analysis-workflows.md
     @SuppressFBWarnings(value = "IMPROPER_UNICODE", justification = "case-insensitive comparison of an internal/domain value (status/flag/enum/MIME/code); not a security or authorization decision")
     public String saveManage() {
+        if (!requireContactPost()) {
+            return NONE;
+        }
         LoggedInInfo loggedInInfo = LoggedInInfo.getLoggedInInfoFromSession(request);
 
         int demographicNo = Integer.parseInt(request.getParameter("demographic_no"));
@@ -208,7 +220,11 @@ public class Contact2Action extends ActionSupport {
             throw new SecurityException("missing required sec object (_demographic)");
         }
 
-        DemographicContact demographicContact = null;
+        int maxProContact = Integer.parseInt(request.getParameter("procontact_num"));
+        // Validate both categories and reciprocal writes before changing any row.
+        Map<Integer, String> reciprocalRoles = validateContactSaves(PERSONAL_CONTACT_PREFIX, maxContact, demographicNo, loggedInInfo);
+        validateContactSaves(PROFESSIONAL_CONTACT_PREFIX, maxProContact, demographicNo, loggedInInfo);
+        findContactRemovals(demographicNo);
 
         if ("ajax".equalsIgnoreCase(postMethod)) {
             forward = postMethod;
@@ -216,93 +232,17 @@ public class Contact2Action extends ActionSupport {
 
         for (int x = 1; x <= maxContact; x++) {
 
-            String demographicContactId = request.getParameter("contact_" + x + ".id");
+            String demographicContactId = request.getParameter(PERSONAL_CONTACT_PREFIX + x + ".id");
 
             if (demographicContactId != null) {
 
-                String contactId = request.getParameter("contact_" + x + ".contactId");
+                String contactId = request.getParameter(PERSONAL_CONTACT_PREFIX + x + CONTACT_ID_SUFFIX);
                 if (contactId.length() == 0 || contactId.equals("0")) {
                     continue;
                 }
 
-                String consentToContact = request.getParameter("contact_" + x + ".consentToContact");
-                String activeStatus = request.getParameter("contact_" + x + ".active");
-
-                boolean activeStatusOn = Boolean.TRUE;
-                boolean consentToContactOn = Boolean.TRUE;
-
-                if ("0".equals(consentToContact)) {
-                    consentToContactOn = Boolean.FALSE;
-                }
-                if ("0".equals(activeStatus)) {
-                    activeStatusOn = Boolean.FALSE;
-                }
-
-                int demographicContactIdInt = Integer.parseInt(demographicContactId);
-
-                demographicContact = linkContactToDemographic(contactId,
-                        demographicContactIdInt,
-                        demographicNo,
-                        request.getParameter("contact_" + x + ".role"),
-                        request.getParameter("contact_" + x + ".type"),
-                        request.getParameter("contact_" + x + ".note"),
-                        DemographicContact.CATEGORY_PERSONAL,
-                        request.getParameter("contact_" + x + ".sdm"),
-                        request.getParameter("contact_" + x + ".ec"),
-                        consentToContactOn,
-                        activeStatusOn,
-                        loggedInInfo);
-
-                //internal - do the reverse
-                if (demographicContact.getType() == 1) {
-
-                    //check if it exists
-                    if ((demographicContactDao.find(Integer.parseInt(contactId), demographicNo)).size() == 0) {
-
-                        if (demographicContactIdInt > 0) {
-                            demographicContact = demographicContactDao.find(demographicContactIdInt);
-                        } else {
-                            demographicContact = new DemographicContact();
-                        }
-
-                        //c.setDemographicNo( contactIdInt );
-                        String role = getReverseRole(request.getParameter("contact_" + x + ".role"), demographicNo);
-                        if (role != null) {
-
-                            linkContactToDemographic(demographicNo + "",  // yes this is intentional
-                                    demographicContactIdInt,
-                                    Integer.parseInt(contactId), // yes this is intentional
-                                    role,
-                                    request.getParameter("contact_" + x + ".type"),
-                                    request.getParameter("contact_" + x + ".note"),
-                                    DemographicContact.CATEGORY_PERSONAL,
-                                    "",
-                                    "",
-                                    consentToContactOn,
-                                    activeStatusOn,
-                                    loggedInInfo);
-
-                        }
-                    }
-
-                }
-            }
-        }
-
-        int maxProContact = Integer.parseInt(request.getParameter("procontact_num"));
-
-        for (int x = 1; x <= maxProContact; x++) {
-
-            String demographicContactId = request.getParameter("procontact_" + x + ".id");
-            if (demographicContactId != null) {
-
-                String contactId = request.getParameter("procontact_" + x + ".contactId");
-                if (contactId.length() == 0 || contactId.equals("0")) {
-                    continue;
-                }
-
-                String consentToContact = request.getParameter("contact_" + x + ".consentToContact");
-                String activeStatus = request.getParameter("contact_" + x + ".active");
+                String consentToContact = request.getParameter(PERSONAL_CONTACT_PREFIX + x + ".consentToContact");
+                String activeStatus = request.getParameter(PERSONAL_CONTACT_PREFIX + x + ".active");
 
                 boolean activeStatusOn = Boolean.TRUE;
                 boolean consentToContactOn = Boolean.TRUE;
@@ -319,12 +259,70 @@ public class Contact2Action extends ActionSupport {
                 linkContactToDemographic(contactId,
                         demographicContactIdInt,
                         demographicNo,
-                        request.getParameter("procontact_" + x + ".role"),
-                        request.getParameter("procontact_" + x + ".type"),
-                        request.getParameter("procontact_" + x + ".note"),
+                        request.getParameter(PERSONAL_CONTACT_PREFIX + x + CONTACT_ROLE_SUFFIX),
+                        request.getParameter(PERSONAL_CONTACT_PREFIX + x + CONTACT_TYPE_SUFFIX),
+                        request.getParameter(PERSONAL_CONTACT_PREFIX + x + CONTACT_NOTE_SUFFIX),
+                        DemographicContact.CATEGORY_PERSONAL,
+                        request.getParameter(PERSONAL_CONTACT_PREFIX + x + ".sdm"),
+                        request.getParameter(PERSONAL_CONTACT_PREFIX + x + ".ec"),
+                        consentToContactOn,
+                        activeStatusOn,
+                        loggedInInfo);
+
+                // Only create reciprocal rows authorized before any save. Recheck
+                // existence so repeated targets in this submission do not duplicate them.
+                String reverseRole = reciprocalRoles.get(x);
+                if (reverseRole != null && demographicContactDao.find(Integer.parseInt(contactId), demographicNo).isEmpty()) {
+                    linkContactToDemographic(Integer.toString(demographicNo),
+                            0, // A reciprocal association is a distinct row.
+                            Integer.parseInt(contactId),
+                            reverseRole,
+                            Integer.toString(DemographicContact.TYPE_DEMOGRAPHIC),
+                            request.getParameter(PERSONAL_CONTACT_PREFIX + x + CONTACT_NOTE_SUFFIX),
+                            DemographicContact.CATEGORY_PERSONAL,
+                            null, // Reciprocal relationships do not grant SDM or emergency-contact status.
+                            null,
+                            consentToContactOn,
+                            activeStatusOn,
+                            loggedInInfo);
+                }
+            }
+        }
+
+        for (int x = 1; x <= maxProContact; x++) {
+
+            String demographicContactId = request.getParameter(PROFESSIONAL_CONTACT_PREFIX + x + ".id");
+            if (demographicContactId != null) {
+
+                String contactId = request.getParameter(PROFESSIONAL_CONTACT_PREFIX + x + CONTACT_ID_SUFFIX);
+                if (contactId.length() == 0 || contactId.equals("0")) {
+                    continue;
+                }
+
+                String consentToContact = request.getParameter(PROFESSIONAL_CONTACT_PREFIX + x + ".consentToContact");
+                String activeStatus = request.getParameter(PROFESSIONAL_CONTACT_PREFIX + x + ".active");
+
+                boolean activeStatusOn = Boolean.TRUE;
+                boolean consentToContactOn = Boolean.TRUE;
+
+                if ("0".equals(consentToContact)) {
+                    consentToContactOn = Boolean.FALSE;
+                }
+                if ("0".equals(activeStatus)) {
+                    activeStatusOn = Boolean.FALSE;
+                }
+
+                int demographicContactIdInt = Integer.parseInt(demographicContactId);
+
+                linkContactToDemographic(contactId,
+                        demographicContactIdInt,
+                        demographicNo,
+                        request.getParameter(PROFESSIONAL_CONTACT_PREFIX + x + CONTACT_ROLE_SUFFIX),
+                        request.getParameter(PROFESSIONAL_CONTACT_PREFIX + x + CONTACT_TYPE_SUFFIX),
+                        request.getParameter(PROFESSIONAL_CONTACT_PREFIX + x + CONTACT_NOTE_SUFFIX),
                         DemographicContact.CATEGORY_PROFESSIONAL,
-                        request.getParameter("procontact_" + x + ".sdm"),
-                        request.getParameter("procontact_" + x + ".ec"),
+                        request.getParameter(PROFESSIONAL_CONTACT_PREFIX + x + ".sdm"),
+                        request.getParameter(PROFESSIONAL_CONTACT_PREFIX + x + ".ec"),
                         consentToContactOn,
                         activeStatusOn,
                         loggedInInfo);
@@ -340,8 +338,8 @@ public class Contact2Action extends ActionSupport {
 
     // FindSecBugs IMPROPER_UNICODE: case-insensitive comparison of an internal/domain value (status/flag/enum/MIME/code); not a security or authorization decision. See docs/static-analysis-workflows.md
     @SuppressFBWarnings(value = "IMPROPER_UNICODE", justification = "case-insensitive comparison of an internal/domain value (status/flag/enum/MIME/code); not a security or authorization decision")
-    private String getReverseRole(String roleName, int targetDemographicNo) {
-        Demographic demographic = demographicDao.getDemographicById(targetDemographicNo);
+    private String getReverseRole(String roleName, int sourceDemographicNo) {
+        Demographic demographic = demographicDao.getDemographicById(sourceDemographicNo);
 
         if (roleName.equals("Mother") || roleName.equals("Father") || roleName.equals("Parent")) {
             if (demographic.getSex().equalsIgnoreCase("M")) {
@@ -379,64 +377,98 @@ public class Contact2Action extends ActionSupport {
     @SuppressFBWarnings(value = "IMPROPER_UNICODE", justification = "case-insensitive comparison of an internal/domain value (status/flag/enum/MIME/code); not a security or authorization decision")
     @SuppressWarnings("unused")
     public String removeContact() {
+        if (!requireContactPost()) {
+            return NONE;
+        }
 
-        ArrayList<String> arrayListIds = null;
-        String[] ids = null;
-        String[] proContactIds = request.getParameterValues("procontact.delete");
-        String[] contactIds = request.getParameterValues("contact.delete");
-        String postMethod = request.getParameter("postMethod");
-        String removeSingleId = request.getParameter("contactId");
         String demographicNo = StringUtils.trimToNull(request.getParameter("demographic_no"));
-        String actionForward = null;
-
-        if (!securityInfoManager.hasPrivilege(LoggedInInfo.getLoggedInInfoFromSession(request), "_demographic", "r", demographicNo)) {
+        if (demographicNo == null || !securityInfoManager.hasPrivilege(
+                LoggedInInfo.getLoggedInInfoFromSession(request), "_demographic", "w", demographicNo)) {
             throw new SecurityException("missing required sec object (_demographic)");
         }
-
-        if ("ajax".equalsIgnoreCase(postMethod)) {
-            actionForward = postMethod;
+        for (DemographicContact association : findContactRemovals(Integer.parseInt(demographicNo))) {
+            association.setDeleted(true);
+            demographicContactDao.merge(association);
         }
+        String postMethod = request.getParameter("postMethod");
+        return "ajax".equalsIgnoreCase(postMethod) ? postMethod : null;
+    }
 
-        if (removeSingleId != null) {
-            ids = new String[]{removeSingleId};
-        }
-
-        if (proContactIds != null || contactIds != null) {
-            arrayListIds = new ArrayList<String>();
-
-            if (proContactIds != null) {
-                for (String x : Arrays.asList(proContactIds)) {
-                    if (x != null && !x.isEmpty()) {
-                        arrayListIds.add(x);
-                    }
+    private List<DemographicContact> findContactRemovals(int demographicNo) {
+        List<String> ids = new ArrayList<>();
+        for (String parameter : Arrays.asList("procontact.delete", "contact.delete")) {
+            String[] values = request.getParameterValues(parameter);
+            if (values != null) {
+                for (String value : values) {
+                    if (StringUtils.isNotBlank(value)) ids.add(value);
                 }
             }
+        }
+        if (ids.isEmpty() && request.getParameter(CONTACT_ID_PARAMETER) != null) {
+            ids.add(request.getParameter(CONTACT_ID_PARAMETER));
+        }
+        List<DemographicContact> removals = new ArrayList<>();
+        for (String id : ids) {
+            int associationId = Integer.parseInt(id);
+            // An unsaved editor row has no persisted association to remove.
+            if (associationId != 0) removals.add(requireOwnedContact(associationId, demographicNo));
+        }
+        return removals;
+    }
 
-            if (contactIds != null) {
-                for (String x : Arrays.asList(contactIds)) {
-                    if (x != null && !x.isEmpty()) {
-                        arrayListIds.add(x);
+    private Map<Integer, String> validateContactSaves(String prefix, int count, int demographicNo, LoggedInInfo loggedInInfo) {
+        Map<Integer, String> reciprocalRoles = new HashMap<>();
+        for (int row = 1; row <= count; row++) {
+            String field = prefix + row;
+            String id = request.getParameter(field + ".id");
+            if (id == null) continue;
+            int associationId = Integer.parseInt(id);
+            DemographicContact existing = associationId == 0 ? null : requireOwnedContact(associationId, demographicNo);
+            if (PERSONAL_CONTACT_PREFIX.equals(prefix)) {
+                String reverseRole = findNewReciprocalRole(field, existing, demographicNo);
+                if (reverseRole != null) {
+                    String contactId = request.getParameter(field + CONTACT_ID_SUFFIX);
+                    if (!securityInfoManager.hasPrivilege(loggedInInfo, "_demographic", "w", contactId)) {
+                        throw new SecurityException("missing required sec object (_demographic)");
                     }
+                    reciprocalRoles.put(row, reverseRole);
                 }
             }
-
-            if (arrayListIds != null && !arrayListIds.isEmpty()) {
-                ids = (String[]) arrayListIds.toArray();
-            }
         }
+        return reciprocalRoles;
+    }
 
-        if (ids != null && ids.length > 0) {
-            int contactId;
-            for (String id : ids) {
-                contactId = Integer.parseInt(id);
-                DemographicContact dc = demographicContactDao.find(contactId);
-                dc.setDeleted(true);
-                demographicContactDao.merge(dc);
-            }
+    private String findNewReciprocalRole(String field, DemographicContact existing, int demographicNo) {
+        String contactId = request.getParameter(field + CONTACT_ID_SUFFIX);
+        if (StringUtils.isBlank(contactId) || "0".equals(contactId)) return null;
+
+        // Existing rows disable their type selector. Preserve that classification
+        // even if a crafted request supplies a different type; persistence uses
+        // the same rule, so reciprocal planning cannot change independently.
+        String submittedType = request.getParameter(field + CONTACT_TYPE_SUFFIX);
+        int effectiveType = DemographicContact.TYPE_PROVIDER;
+        if (existing != null) effectiveType = existing.getType();
+        else if (submittedType != null) effectiveType = Integer.parseInt(submittedType);
+        if (effectiveType != DemographicContact.TYPE_DEMOGRAPHIC
+                || !demographicContactDao.find(Integer.parseInt(contactId), demographicNo).isEmpty()) return null;
+        return getReverseRole(request.getParameter(field + CONTACT_ROLE_SUFFIX), demographicNo);
+    }
+
+    private static DemographicContact requireOwnedContact(int associationId, int demographicNo) {
+        DemographicContact association = demographicContactDao.find(associationId);
+        if (association == null || association.getDemographicNo() != demographicNo) {
+            throw new SecurityException("Contact association does not belong to the requested patient");
         }
+        return association;
+    }
 
-        return actionForward;
-
+    private boolean requireContactPost() {
+        if ("POST".equals(request.getMethod())) {
+            return true;
+        }
+        response.setHeader("Allow", "POST");
+        response.setStatus(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+        return false;
     }
 
     @SuppressWarnings("unused")
@@ -468,7 +500,7 @@ public class Contact2Action extends ActionSupport {
     @SuppressWarnings("unused")
     public String editHealthCareTeam() {
 
-        String demographicContactId = request.getParameter("contactId");
+        String demographicContactId = request.getParameter(CONTACT_ID_PARAMETER);
         DemographicContact demographicContact = null;
         Integer contactType = null;
         String contactCategory = "";
@@ -623,7 +655,7 @@ public class Contact2Action extends ActionSupport {
 
         // slingshot the DemographicContact details back to the request.
         // the saveManage method is to difficult to re-engineer
-        request.setAttribute("contactId", id);
+        request.setAttribute(CONTACT_ID_PARAMETER, id);
 
         // forward from pop-up to forward page.
         request.setAttribute("demographicContactId", request.getParameter("demographicContactId"));
@@ -640,7 +672,7 @@ public class Contact2Action extends ActionSupport {
      * Switches in the request parameters determine the action:
      * <p>
      * "contactType": DemographicContact.TYPE_PROFESSIONALSPECIALIST [3] = ProfessionalSpecialist, else ProfessionalContact
-     * "contactId": >0 = merge edited specialist by contactType, 0 = new specialist by contactType
+     * CONTACT_ID_PARAMETER: >0 = merge edited specialist by contactType, 0 = new specialist by contactType
      * "demographicContactId" plus "demographicNo" = when both >0 edit current DemographicContact entry.
      * <p>
      * The incoming DynaForm is an abstract Contact entity as ProfessionalContact.
@@ -789,7 +821,7 @@ public class Contact2Action extends ActionSupport {
         // Set up attributes for form re-render and parent window communication
         request.setAttribute("specialties", contactSpecialtyDao.findAll());
         request.setAttribute("contactRole", contactRole);
-        request.setAttribute("contactId", contactId);
+        request.setAttribute(CONTACT_ID_PARAMETER, contactId);
         request.setAttribute("contactName", contact.getFormattedName());
         request.setAttribute("demographicContactId", demographicContactId);
         request.setAttribute("contactType", contactType);
@@ -804,7 +836,7 @@ public class Contact2Action extends ActionSupport {
     @SuppressWarnings("unused")
     public String setEmergencyContact() {
 
-        String contactId = request.getParameter("contactId");
+        String contactId = request.getParameter(CONTACT_ID_PARAMETER);
         boolean toggle = Boolean.parseBoolean(request.getParameter("setting"));
 
         LoggedInInfo loggedInInfo = LoggedInInfo.getLoggedInInfoFromSession(request);
@@ -831,7 +863,7 @@ public class Contact2Action extends ActionSupport {
     @SuppressWarnings("unused")
     public String setDNC() {
 
-        String contactId = request.getParameter("contactId");
+        String contactId = request.getParameter(CONTACT_ID_PARAMETER);
         String contactGroup = request.getParameter("contactGroup");
 
         int contactIdInt = Integer.parseInt(contactId);
@@ -856,7 +888,7 @@ public class Contact2Action extends ActionSupport {
     @SuppressWarnings("unused")
     public String setMRP() {
 
-        String contactId = request.getParameter("contactId");
+        String contactId = request.getParameter(CONTACT_ID_PARAMETER);
         int contactIdInt = Integer.parseInt(contactId);
 
         LoggedInInfo loggedInInfo = LoggedInInfo.getLoggedInInfoFromSession(request);
@@ -914,7 +946,7 @@ public class Contact2Action extends ActionSupport {
 
         LoggedInInfo loggedInInfo = LoggedInInfo.getLoggedInInfoFromSession(request);
 
-        String pharmacyId = request.getParameter("contactId");
+        String pharmacyId = request.getParameter(CONTACT_ID_PARAMETER);
         String demographic_no = request.getParameter("demographic_no");
         String preferredOrder = request.getParameter("preferredOrder");
 
@@ -930,7 +962,7 @@ public class Contact2Action extends ActionSupport {
     @SuppressWarnings("unused")
     public String removePharmacy() {
         LoggedInInfo loggedInInfo = LoggedInInfo.getLoggedInInfoFromSession(request);
-        String demographicPharmacyId = request.getParameter("contactId");
+        String demographicPharmacyId = request.getParameter(CONTACT_ID_PARAMETER);
         String demographic_no = request.getParameter("demographic_no");
 
         pharmacyManager.removePharmacy(loggedInInfo, Integer.parseInt(demographic_no), Integer.parseInt(demographicPharmacyId));
@@ -956,7 +988,7 @@ public class Contact2Action extends ActionSupport {
     @SuppressWarnings("unused")
     public String editPharmacyInfo() {
         LoggedInInfo loggedInInfo = LoggedInInfo.getLoggedInInfoFromSession(request);
-        String pharmacyId = request.getParameter("contactId");
+        String pharmacyId = request.getParameter(CONTACT_ID_PARAMETER);
         String demographic_no = request.getParameter("demographic_no");
         PharmacyInfo pharmacyInfo = null;
 
@@ -1015,11 +1047,10 @@ public class Contact2Action extends ActionSupport {
      **/
 
     /*
-     * Links a Contact with Demographic with the DemographicContact associate table.
-     * Edit DemographicContact by setting demographicContactId to 0.
-     * Add a DemographicContact by setting demographicContactId > 0.
-     * All parameters are mandatory.
-     * sdm & ec can be set to null for default false.
+     * Creates or updates a contact association owned by the supplied patient.
+     * A zero association ID creates a row; a positive ID updates an owned row.
+     * Existing rows retain their type. New rows use the supplied type or the model default.
+     * Null sdm/ec values mean unselected; non-null values represent selected checkboxes.
      */
     private static final DemographicContact linkContactToDemographic(final String contactId, final Integer demographicContactId,
                                                                      final Integer demographic_no, final String role, final String type, final String note, final String category,
@@ -1028,17 +1059,17 @@ public class Contact2Action extends ActionSupport {
         DemographicContact demographicContact;
 
         if (demographicContactId > 0) {
-            demographicContact = demographicContactDao.find(demographicContactId);
+            demographicContact = requireOwnedContact(demographicContactId, demographic_no);
         } else {
             demographicContact = new DemographicContact();
+            if (type != null) {
+                demographicContact.setType(Integer.parseInt(type));
+            }
         }
 
         demographicContact.setDemographicNo(demographic_no);
         demographicContact.setRole(role);
 
-        if (type != null) {
-            demographicContact.setType(Integer.parseInt(type));
-        }
         demographicContact.setNote(note);
         demographicContact.setContactId(contactId);
 

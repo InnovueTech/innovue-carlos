@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
-  ERROR_PAGE_RE, catalogueLinks, dedupe, findingsSince, itemLocator, snapshotRecorder,
+  ERROR_PAGE_RE, auditCatalogue, catalogueLinks, dedupe, findingsSince, itemLocator, snapshotRecorder,
 } = require('./lib/playwright-link-audit');
 const { createRecorder } = require('./lib/playwright-harness');
 
@@ -403,6 +403,7 @@ function fakeAuditPage(options = {}) {
         nth: (index) => ({
           textContent: async () => options.textFor(index),
           scrollIntoViewIfNeeded: async () => {},
+          evaluate: async () => [],
           click: async () => {
             if (options.actsInPlace) { markup += 'y'; runInPage.markup = markup; }
             if (options.onClick) { options.onClick(index); }
@@ -729,7 +730,7 @@ test('a broken popup from an unclassified opener is a failure, not a clean host 
     timeout: 1000,
   });
   assert.deepEqual(result.opened, []);
-  assert.deepEqual(result.failures, ['Hidden Opener: rendered an error page']);
+  assert.deepEqual(result.failures, ['Hidden Opener: audit destination rendered an error page']);
   assert.equal(popup.closed, true);
 });
 
@@ -751,7 +752,7 @@ test('a blank popup from an unclassified opener is a failure too', async () => {
     labelPrefix: 'admin',
     timeout: 1000,
   });
-  assert.deepEqual(result.failures, ['Hidden Opener: rendered a blank page']);
+  assert.deepEqual(result.failures, ['Hidden Opener: audit destination rendered a blank page']);
 });
 
 test('the administration shell keeps its route in rel, and that is catalogued', async () => {
@@ -816,7 +817,7 @@ test('an in-place destination is read from the container, not from the shell aro
             locator: () => ({
               first: () => ({
                 count: async () => panel.frames,
-                contentFrame: async () => null,
+                contentFrame: () => ({ locator: () => ({ innerText: async () => panel.text }) }),
               }),
             }),
           }),
@@ -826,6 +827,7 @@ test('an in-place destination is read from the container, not from the shell aro
         nth: () => ({
           textContent: async () => 'Broken Item',
           scrollIntoViewIfNeeded: async () => {},
+          evaluate: async () => [],
           click: async () => { panel.text = ''; },
         }),
         first: () => ({ inputValue: async () => '' }),
@@ -1036,3 +1038,102 @@ function runInPageWith(markup, fn) {
     runInPage.markup = previous;
   }
 }
+
+
+test('hidden audit entries are revealed through outer controls before the chart hover menu', async () => {
+  const { revealAuditLink } = require('./lib/playwright-link-audit');
+  const events = [];
+  const page = { locator: selector => {
+    assert.equal(selector, 'a, button');
+    return { nth: index => ({
+      evaluate: async () => `control-${index}`,
+      click: async () => events.push(`click ${index}`),
+      hover: async () => events.push(`hover ${index}`),
+    }) };
+  } };
+  await revealAuditLink(page, { evaluate: async () => [{ index: 3, hover: false, markup: 'control-3' }, { index: 9, hover: true, markup: 'control-9' }] }, 100);
+  assert.deepEqual(events, ['click 3', 'hover 9']);
+});
+
+
+test('menu reveal refuses to click a different control after the page changes', async () => {
+  const { revealAuditLink } = require('./lib/playwright-link-audit');
+  let clicked = false;
+  const page = { locator: () => ({ nth: () => ({
+    evaluate: async () => '<button>Delete</button>',
+    click: async () => { clicked = true; },
+  }) }) };
+  await assert.rejects(revealAuditLink(page, {
+    evaluate: async () => [{ index: 3, hover: false, markup: '<button>Expand</button>' }],
+  }, 100), /refusing to click a different control/);
+  assert.equal(clicked, false);
+});
+
+
+test('iframe destination uses the synchronous FrameLocator and preserves blank/error results', async () => {
+  const { destinationText } = require('./lib/playwright-link-audit');
+  for (const text of ['Actual iframe destination', '', 'HTTP Status 500']) {
+    const iframe = {
+      count: async () => 1,
+      contentFrame: () => ({ locator: selector => {
+        assert.equal(selector, 'body');
+        return { innerText: async () => text };
+      } }),
+    };
+    const panel = {
+      count: async () => 1,
+      innerText: async () => 'Shell text must never hide the iframe',
+      locator: selector => { assert.equal(selector, 'iframe'); return { first: () => iframe }; },
+    };
+    const page = { locator: selector => { assert.equal(selector, '#dynamic-content'); return { first: () => panel }; } };
+    assert.equal(await destinationText({ page, isPopup: false }, '#dynamic-content', 100), text);
+  }
+});
+
+test('a missing required in-place container cannot pass using shell text', async () => {
+  const { destinationText } = require('./lib/playwright-link-audit');
+  const url = 'http://localhost/carlos/administration';
+  const page = {
+    url: () => url,
+    locator: () => ({ first: () => ({ count: async () => 0 }),
+      innerText: async () => 'Administration navigation and header' }),
+  };
+  await assert.rejects(destinationText({ page, isPopup: false, cameFrom: url },
+    '#dynamic-content', 100), /required destination container/);
+});
+
+for (const [url, text, error] of [
+  ['http://localhost/carlos/administration#panel', 'Administration shell', /required destination container/],
+  ['http://localhost/carlos/report', 'Report destination', null],
+  ['http://localhost/carlos/report', 'HTTP Status 500', /rendered an error page/],
+]) {
+  test(`missing shell panel handles navigation to ${url} with ${text}`, async () => {
+    const { destinationText } = require('./lib/playwright-link-audit');
+    const page = { url: () => url, locator: () => ({
+      first: () => ({ count: async () => 0 }), innerText: async () => text,
+    }) };
+    const result = destinationText({ page, isPopup: false,
+      cameFrom: 'http://localhost/carlos/administration' }, '#dynamic-content', 100);
+    if (error) await assert.rejects(result, error);
+    else assert.equal(await result, text);
+  });
+}
+
+test('plain current-document links are skipped without inflating destination coverage', async () => {
+  const f = fakeAuditPage({ textFor: () => 'Current page', onClick: () => { throw new Error('self-link was clicked'); } });
+  const result = await auditCatalogue({ context: {}, hostPage: f.page,
+    items: [{ index: 0, text: 'Current page', href: f.page.url(), hasClickHandler: false }],
+    recorder: createRecorder(), labelPrefix: 'self-link', timeout: 20 });
+  assert.deepEqual(result, { opened: [], skipped: 1, failures: [] });
+});
+
+test('current-document exclusion preserves handlers, popups and different destinations', () => {
+  const { isCurrentDocumentLink } = require('./lib/playwright-link-audit');
+  const host = 'https://example.invalid/carlos/view?id=1';
+  const item = { href: 'view?id=1', baseURI: host, hasClickHandler: false };
+  assert.equal(isCurrentDocumentLink(item, host), true);
+  for (const changed of [{ hasClickHandler: true }, { opensPopup: true }, { route: '/action' },
+    { href: 'view?id=2' }, { href: '/elsewhere' }, { href: 'http://[' }]) {
+    assert.equal(isCurrentDocumentLink({ ...item, ...changed }, host), false);
+  }
+});
