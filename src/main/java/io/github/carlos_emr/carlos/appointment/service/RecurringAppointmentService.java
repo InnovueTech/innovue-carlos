@@ -1,0 +1,209 @@
+/* Copyright (c) 2026 CARLOS Contributors. SPDX-License-Identifier: GPL-2.0-or-later */
+package io.github.carlos_emr.carlos.appointment.service;
+
+import io.github.carlos_emr.carlos.commn.dao.AppointmentArchiveDao;
+import io.github.carlos_emr.carlos.commn.dao.OscarAppointmentDao;
+import io.github.carlos_emr.carlos.commn.model.Appointment;
+import io.github.carlos_emr.carlos.managers.SecurityInfoManager;
+import io.github.carlos_emr.carlos.utility.LoggedInInfo;
+import java.sql.Date;
+import java.sql.Time;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.time.format.ResolverStyle;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/** Atomic recurring-booking operations using the existing series identity (no schema change). */
+@Service
+public class RecurringAppointmentService {
+    private final OscarAppointmentDao appointments;
+    private final AppointmentArchiveDao archives;
+    private final SecurityInfoManager security;
+
+    public RecurringAppointmentService(OscarAppointmentDao appointments, AppointmentArchiveDao archives,
+                                       SecurityInfoManager security) {
+        this.appointments = appointments;
+        this.archives = archives;
+        this.security = security;
+    }
+
+    /** All validation and series discovery precede writes; a failure rolls back the entire operation. */
+    @Transactional
+    public int apply(LoggedInInfo user, Map<String, String> values, int programId) {
+        if (user == null || !security.hasPrivilege(user, "_appointment", "w", null)
+                || !security.hasPrivilege(user, "_appointment", "u", null)) {
+            throw new SecurityException("missing required appointment privileges");
+        }
+        String operation = values.getOrDefault("groupappt", "");
+        if (!Set.of("Add Group Appointment", "Group Update", "Group Cancel", "Group Delete").contains(operation)) {
+            throw new IllegalArgumentException("Choose a recurring appointment action.");
+        }
+        Appointment template = template(values, programId, user.getLoggedInProviderNo());
+        LocalDate start = Date.valueOf(values.get("appointment_date")).toLocalDate();
+        LocalDate end;
+        try {
+            end = LocalDate.parse(values.getOrDefault("endDate", ""),
+                    DateTimeFormatter.ofPattern("dd/MM/uuuu").withResolverStyle(ResolverStyle.STRICT));
+        } catch (DateTimeParseException ex) {
+            throw new IllegalArgumentException("Choose a valid end date (dd/mm/yyyy).");
+        }
+        List<LocalDate> dates = RecurrenceDates.between(start, end,
+                number(values.get("everyNum"), "repeat interval"), values.getOrDefault("everyUnit", ""));
+        boolean adding = operation.equals("Add Group Appointment");
+        String id = values.get("appointment_no");
+        Appointment anchor = id == null || id.isBlank() ? null
+                : appointments.findForUpdate(number(id, "appointment number"));
+        if ((id != null && !id.isBlank() && anchor == null) || (!adding && anchor == null)) {
+            throw new IllegalArgumentException("This appointment no longer exists. Reopen the schedule.");
+        }
+        if (anchor != null && !Objects.equals(anchor.getAppointmentDate(), template.getAppointmentDate())) {
+            throw new IllegalArgumentException("Save the appointment date before changing its repeats.");
+        }
+        if (adding && anchor != null && !sameDetails(anchor, template)) {
+            throw new IllegalArgumentException("Save changes to the appointment before creating repeats.");
+        }
+        Appointment identity = anchor == null ? template : anchor;
+        List<Appointment> existing = new ArrayList<>();
+        List<LocalDate> missing = new ArrayList<>();
+        for (LocalDate date : dates) {
+            List<Appointment> matches = anchor == null ? List.of()
+                    : appointments.findByDateAndProvider(Date.valueOf(date), anchor.getProviderNo()).stream()
+                    .filter(candidate -> sameSeries(candidate, identity)).toList();
+            if (matches.isEmpty()) missing.add(date);
+            existing.addAll(matches);
+        }
+        if (adding) {
+            for (LocalDate date : missing) {
+                Appointment occurrence = copy(identity);
+                occurrence.setAppointmentDate(Date.valueOf(date));
+                appointments.persist(occurrence);
+            }
+            return missing.size();
+        }
+        if (existing.isEmpty()) {
+            throw new IllegalArgumentException("No matching appointments were found. Reopen the schedule.");
+        }
+        java.util.Date updated = new java.util.Date();
+        // Snapshot all matches first: updating the anchor must not change later series lookups.
+        for (Appointment occurrence : existing) {
+            archives.archiveAppointment(occurrence);
+            if (operation.equals("Group Delete")) {
+                appointments.remove(occurrence.getId());
+            } else {
+                if (operation.equals("Group Cancel")) occurrence.setStatus("C");
+                else applyDetails(occurrence, template);
+                occurrence.setUpdateDateTime(updated);
+                occurrence.setLastUpdateUser(user.getLoggedInProviderNo());
+                appointments.merge(occurrence);
+            }
+        }
+        return existing.size();
+    }
+
+    private static Appointment template(Map<String, String> v, int programId, String creator) {
+        Appointment a = new Appointment();
+        try {
+            a.setAppointmentDate(Date.valueOf(LocalDate.parse(v.getOrDefault("appointment_date", ""))));
+            a.setStartTime(Time.valueOf(LocalTime.parse(v.getOrDefault("start_time", ""))));
+            a.setEndTime(Time.valueOf(LocalTime.parse(v.getOrDefault("end_time", ""))));
+        } catch (DateTimeParseException ex) {
+            throw new IllegalArgumentException("Choose a valid appointment date and start/end time.");
+        }
+        if (a.getEndTime().before(a.getStartTime())) {
+            throw new IllegalArgumentException("The appointment must end on the same day, after it starts.");
+        }
+        String provider = v.getOrDefault("provider_no", "");
+        if (!provider.matches("[0-9]+")) throw new IllegalArgumentException("Choose an appointment provider.");
+        a.setProviderNo(provider);
+        a.setDemographicNo(number(v.getOrDefault("demographic_no", "0"), "patient number"));
+        a.setProgramId(programId);
+        a.setName(v.getOrDefault("keyword", ""));
+        a.setNotes(v.getOrDefault("notes", ""));
+        a.setReason(v.getOrDefault("reason", ""));
+        a.setLocation(v.getOrDefault("location", ""));
+        a.setResources(v.getOrDefault("resources", ""));
+        a.setType(v.getOrDefault("type", ""));
+        a.setStyle(v.getOrDefault("style", ""));
+        a.setBilling(v.getOrDefault("billing", ""));
+        a.setStatus(v.getOrDefault("status", ""));
+        a.setRemarks(v.getOrDefault("remarks", ""));
+        a.setUrgency(v.getOrDefault("urgency", ""));
+        String reasonCode = v.get("reasonCode");
+        a.setReasonCode(reasonCode == null || reasonCode.isBlank() ? null : number(reasonCode, "reason code"));
+        // Whole seconds match the legacy database precision, shared by every new occurrence.
+        a.setCreateDateTime(new java.util.Date(System.currentTimeMillis() / 1000 * 1000));
+        a.setCreator(creator);
+        return a;
+    }
+
+    private static int number(String value, String label) {
+        try {
+            int parsed = Integer.parseInt(value);
+            if (parsed < 0) throw new NumberFormatException();
+            return parsed;
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("Choose a valid " + label + ".");
+        }
+    }
+
+    private static boolean equalText(String first, String second) {
+        return Objects.equals(first == null ? "" : first, second == null ? "" : second);
+    }
+
+    private static boolean sameSeries(Appointment a, Appointment b) {
+        return a.getDemographicNo() == b.getDemographicNo() && a.getProgramId() == b.getProgramId()
+                && Objects.equals(a.getStartTime(), b.getStartTime()) && Objects.equals(a.getEndTime(), b.getEndTime())
+                && equalText(a.getName(), b.getName()) && equalText(a.getNotes(), b.getNotes())
+                && equalText(a.getReason(), b.getReason()) && equalText(a.getCreator(), b.getCreator())
+                && Objects.equals(a.getCreateDateTime(), b.getCreateDateTime());
+    }
+
+    private static boolean sameDetails(Appointment a, Appointment b) {
+        return equalText(a.getProviderNo(), b.getProviderNo()) && a.getDemographicNo() == b.getDemographicNo()
+                && Objects.equals(a.getStartTime(), b.getStartTime()) && Objects.equals(a.getEndTime(), b.getEndTime())
+                && equalText(a.getName(), b.getName()) && equalText(a.getNotes(), b.getNotes())
+                && equalText(a.getReason(), b.getReason()) && equalText(a.getLocation(), b.getLocation())
+                && equalText(a.getResources(), b.getResources()) && equalText(a.getType(), b.getType())
+                && equalText(a.getStyle(), b.getStyle()) && equalText(a.getBilling(), b.getBilling())
+                && equalText(a.getStatus(), b.getStatus()) && equalText(a.getRemarks(), b.getRemarks())
+                && equalText(a.getUrgency(), b.getUrgency()) && Objects.equals(a.getReasonCode(), b.getReasonCode());
+    }
+
+    private static void applyDetails(Appointment target, Appointment source) {
+        target.setProviderNo(source.getProviderNo());
+        target.setStartTime(source.getStartTime());
+        target.setEndTime(source.getEndTime());
+        target.setName(source.getName());
+        target.setDemographicNo(source.getDemographicNo());
+        target.setNotes(source.getNotes());
+        target.setReason(source.getReason());
+        target.setLocation(source.getLocation());
+        target.setResources(source.getResources());
+        target.setType(source.getType());
+        target.setStyle(source.getStyle());
+        target.setBilling(source.getBilling());
+        target.setStatus(source.getStatus());
+        target.setRemarks(source.getRemarks());
+        target.setUrgency(source.getUrgency());
+        target.setReasonCode(source.getReasonCode());
+    }
+
+    private static Appointment copy(Appointment source) {
+        Appointment target = new Appointment();
+        applyDetails(target, source);
+        target.setProgramId(source.getProgramId());
+        target.setCreateDateTime(source.getCreateDateTime());
+        target.setCreator(source.getCreator());
+        target.setCreatorSecurityId(source.getCreatorSecurityId());
+        target.setBookingSource(source.getBookingSource());
+        return target;
+    }
+}
