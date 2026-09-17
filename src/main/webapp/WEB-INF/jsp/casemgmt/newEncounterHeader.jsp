@@ -28,6 +28,16 @@
 
 --%>
 
+<%--
+  Purpose: Render the patient identity and utility links above the encounter.
+  Features: Identity copying, calculator navigation and configured chart links.
+  The calculator menu resolves clinical defaults server-side using the originating
+  chart's record reference instead of including age or sex in the header URL.
+  Parameters: EctSessionBean and the authenticated session supply the encounter
+  and provider context; there are no direct request parameters for this fragment.
+  @since 2026-09-17
+--%>
+
 
 <%@ taglib uri="jakarta.tags.fmt" prefix="fmt" %>
 <fmt:setBundle basename="oscarResources"/>
@@ -66,6 +76,7 @@
     String popupPatientAge = demographic == null ? "" : String.valueOf(demographic.getAge());
     pageContext.setAttribute("popupPatientSex", popupPatientSex);
     pageContext.setAttribute("popupPatientAge", popupPatientAge);
+    pageContext.setAttribute("popupDemographicNo", demoNo);
 
 %>
 
@@ -113,6 +124,10 @@ function fallbackCopy(text) {
 </div>
 
 <div id="header-bottom-row">
+    <div>
+        <a href="${carlos:forHtmlAttribute(ctx)}/encounter/ViewCalculators?demo=${carlos:forUriComponent(popupDemographicNo)}"
+           onclick="window.open('${carlos:forJavaScriptAttribute(ctx)}/encounter/ViewCalculators?demo=${carlos:forUriComponent(popupDemographicNo)}', 'ClinicalCalculators', 'width=800,height=650,scrollbars=yes,resizable=yes'); return false;"><fmt:message key="encounter.Index.calculators"/></a>
+    </div>
     <% if (CarlosProperties.getInstance().hasProperty("ONTARIO_MD_INCOMINGREQUESTOR")) {%>
         <div>
         <a href="javascript:void(0);" onClick="popupPage(600,175,'Calculators','${carlos:forJavaScript(ctx)}/commons/omdDiseaseList.jsp?sex=${carlos:forUriComponent(popupPatientSex)}&age=${carlos:forUriComponent(popupPatientAge)}'); return false;"><fmt:message key="encounter.Header.OntMD"/></a>

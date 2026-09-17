@@ -35,6 +35,15 @@
      spliced into a JavaScript string below, so it is JavaScript-encoded first. --%>
 <fmt:message key="encounter.calculators.CoronaryArteryDiseaseRiskPrediction.msgInvalidAge" var="msgInvalidAge"/>
 
+<%--
+  Purpose: Display the coronary artery disease risk calculator.
+  Features: Editable clinical inputs, sex-specific scoring and a displayed risk
+  result; styling uses the application context path from this nested route.
+  Parameters: Legacy sex and age query parameters optionally prefill the form;
+  all calculator edits and calculations occur in the browser.
+  @since 2026-09-17
+--%>
+
 <html lang="<%= io.github.carlos_emr.carlos.utility.SafeEncode.forHtmlAttribute(request.getLocale().getLanguage()) %>">
 
 
