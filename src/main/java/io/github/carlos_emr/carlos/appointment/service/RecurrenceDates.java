@@ -14,7 +14,7 @@ public final class RecurrenceDates {
         if (start == null || end == null || end.isBefore(start)) {
             throw new IllegalArgumentException("Choose an end date on or after the appointment date.");
         }
-        if (interval < 1 || interval > 11 || !Set.of("day", "week", "month", "year").contains(unit)) {
+        if (interval < 1 || interval > 11 || unit == null || !Set.of("day", "week", "month", "year").contains(unit)) {
             throw new IllegalArgumentException("Choose an interval from 1 to 11 and a valid repeat unit.");
         }
         if (end.isAfter(start.plusYears(10))) {

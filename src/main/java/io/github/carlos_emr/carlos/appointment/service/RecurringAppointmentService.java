@@ -137,7 +137,8 @@ public class RecurringAppointmentService {
         a.setRemarks(v.getOrDefault("remarks", ""));
         a.setUrgency(v.getOrDefault("urgency", ""));
         String reasonCode = v.get("reasonCode");
-        a.setReasonCode(reasonCode == null || reasonCode.isBlank() ? null : number(reasonCode, "reason code"));
+        a.setReasonCode(reasonCode == null || reasonCode.isBlank() ? null
+                : "-1".equals(reasonCode) ? -1 : number(reasonCode, "reason code"));
         // Whole seconds match the legacy database precision, shared by every new occurrence.
         a.setCreateDateTime(new java.util.Date(System.currentTimeMillis() / 1000 * 1000));
         a.setCreator(creator);

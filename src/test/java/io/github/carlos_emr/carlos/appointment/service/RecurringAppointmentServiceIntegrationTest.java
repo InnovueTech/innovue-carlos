@@ -51,6 +51,7 @@ class RecurringAppointmentServiceIntegrationTest extends CarlosTestBase {
                 "groupappt", "Add Group Appointment", "everyNum", "1", "everyUnit", "week", "endDate", "14/02/2027"));
         values.put("notes", "PW_RECURRENCE_INTEGRATION");
         values.put("status", "t");
+        values.put("reasonCode", "-1"); // The stock appointment form's "Other" option.
     }
 
     private RecurringAppointmentService proxied(OscarAppointmentDao dao) {
