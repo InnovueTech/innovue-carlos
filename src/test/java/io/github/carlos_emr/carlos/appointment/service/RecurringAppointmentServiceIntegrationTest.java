@@ -9,6 +9,7 @@ import io.github.carlos_emr.carlos.test.base.CarlosTestBase;
 import io.github.carlos_emr.carlos.utility.LoggedInInfo;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import java.sql.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -114,6 +115,20 @@ class RecurringAppointmentServiceIntegrationTest extends CarlosTestBase {
         assertThatIllegalArgumentException().isThrownBy(() -> service.apply(user, values, 10016))
                 .withMessageContaining("end date");
         assertThat(rows()).isEmpty();
+    }
+
+    @Test void managesLegacyMonthEndSeriesWithoutMissingDriftedDates() {
+        values.put("everyUnit", "month");
+        values.put("endDate", "31/03/2027");
+        service.apply(user, values, 10016);
+        List<Appointment> series = rows();
+        series.get(2).setAppointmentDate(Date.valueOf("2027-03-28"));
+        appointments.merge(series.get(2));
+        em.flush();
+        values.put("appointment_no", series.getFirst().getId().toString());
+        values.put("groupappt", "Group Cancel");
+        assertThat(service.apply(user, values, 10016)).isEqualTo(3);
+        assertThat(rows()).allSatisfy(a -> assertThat(a.getStatus()).isEqualTo("C"));
     }
 
     @Test void requiresAppointmentPrivileges() {

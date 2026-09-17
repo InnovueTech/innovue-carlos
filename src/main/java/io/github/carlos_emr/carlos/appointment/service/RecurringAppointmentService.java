@@ -71,14 +71,20 @@ public class RecurringAppointmentService {
             throw new IllegalArgumentException("Save changes to the appointment before creating repeats.");
         }
         Appointment identity = anchor == null ? template : anchor;
-        List<Appointment> existing = new ArrayList<>();
+        // Manage the saved series, including old month-end dates that drifted
+        // under GregorianCalendar.add(). Recalculating a new pattern here would
+        // silently miss those existing bookings.
+        List<Appointment> existing = anchor == null ? List.of()
+                : appointments.findRecurringSeries(anchor, Date.valueOf(end));
+        if (existing.size() > 366) {
+            throw new IllegalArgumentException("This range exceeds 366 appointments. Choose an earlier end date.");
+        }
+        Set<LocalDate> existingDates = existing.stream()
+                .map(a -> LocalDate.parse(a.getAppointmentDate().toString()))
+                .collect(java.util.stream.Collectors.toSet());
         List<LocalDate> missing = new ArrayList<>();
         for (LocalDate date : dates) {
-            List<Appointment> matches = anchor == null ? List.of()
-                    : appointments.findByDateAndProvider(Date.valueOf(date), anchor.getProviderNo()).stream()
-                    .filter(candidate -> sameSeries(candidate, identity)).toList();
-            if (matches.isEmpty()) missing.add(date);
-            existing.addAll(matches);
+            if (!existingDates.contains(date)) missing.add(date);
         }
         if (adding) {
             for (LocalDate date : missing) {
@@ -157,14 +163,6 @@ public class RecurringAppointmentService {
 
     private static boolean equalText(String first, String second) {
         return Objects.equals(first == null ? "" : first, second == null ? "" : second);
-    }
-
-    private static boolean sameSeries(Appointment a, Appointment b) {
-        return a.getDemographicNo() == b.getDemographicNo() && a.getProgramId() == b.getProgramId()
-                && Objects.equals(a.getStartTime(), b.getStartTime()) && Objects.equals(a.getEndTime(), b.getEndTime())
-                && equalText(a.getName(), b.getName()) && equalText(a.getNotes(), b.getNotes())
-                && equalText(a.getReason(), b.getReason()) && equalText(a.getCreator(), b.getCreator())
-                && Objects.equals(a.getCreateDateTime(), b.getCreateDateTime());
     }
 
     private static boolean sameDetails(Appointment a, Appointment b) {
