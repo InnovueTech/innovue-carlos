@@ -80,7 +80,7 @@ public class RecurringAppointmentService {
             throw new IllegalArgumentException("This range exceeds 366 appointments. Choose an earlier end date.");
         }
         Set<LocalDate> existingDates = existing.stream()
-                .map(a -> LocalDate.parse(a.getAppointmentDate().toString()))
+                .map(a -> new Date(a.getAppointmentDate().getTime()).toLocalDate())
                 .collect(java.util.stream.Collectors.toSet());
         List<LocalDate> missing = new ArrayList<>();
         for (LocalDate date : dates) {
