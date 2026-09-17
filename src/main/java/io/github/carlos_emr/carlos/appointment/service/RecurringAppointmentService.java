@@ -72,6 +72,12 @@ public class RecurringAppointmentService {
         if (anchor != null && !Objects.equals(anchor.getAppointmentDate(), template.getAppointmentDate())) {
             throw new IllegalArgumentException("Save the appointment date before changing its repeats.");
         }
+        // These fields have no controls in the standard edit form. Absence is
+        // not a request to erase existing scheduling/billing metadata.
+        if (anchor != null) {
+            if (!values.containsKey("style")) template.setStyle(anchor.getStyle());
+            if (!values.containsKey("billing")) template.setBilling(anchor.getBilling());
+        }
         if (adding && anchor != null && !sameDetails(anchor, template)) {
             throw new IllegalArgumentException("Save changes to the appointment before creating repeats.");
         }
@@ -110,7 +116,7 @@ public class RecurringAppointmentService {
                 appointments.remove(occurrence.getId());
             } else {
                 if (operation.equals("Group Cancel")) occurrence.setStatus("C");
-                else applyDetails(occurrence, template);
+                else applyDetails(occurrence, template, values.containsKey("style"), values.containsKey("billing"));
                 occurrence.setUpdateDateTime(updated);
                 occurrence.setLastUpdateUser(user.getLoggedInProviderNo());
                 appointments.merge(occurrence);
@@ -182,7 +188,7 @@ public class RecurringAppointmentService {
                 && equalText(a.getUrgency(), b.getUrgency()) && Objects.equals(a.getReasonCode(), b.getReasonCode());
     }
 
-    private static void applyDetails(Appointment target, Appointment source) {
+    private static void applyDetails(Appointment target, Appointment source, boolean updateStyle, boolean updateBilling) {
         target.setProviderNo(source.getProviderNo());
         target.setStartTime(source.getStartTime());
         target.setEndTime(source.getEndTime());
@@ -193,8 +199,8 @@ public class RecurringAppointmentService {
         target.setLocation(source.getLocation());
         target.setResources(source.getResources());
         target.setType(source.getType());
-        target.setStyle(source.getStyle());
-        target.setBilling(source.getBilling());
+        if (updateStyle) target.setStyle(source.getStyle());
+        if (updateBilling) target.setBilling(source.getBilling());
         target.setStatus(source.getStatus());
         target.setRemarks(source.getRemarks());
         target.setUrgency(source.getUrgency());
@@ -203,7 +209,7 @@ public class RecurringAppointmentService {
 
     private static Appointment copy(Appointment source) {
         Appointment target = new Appointment();
-        applyDetails(target, source);
+        applyDetails(target, source, true, true);
         target.setProgramId(source.getProgramId());
         target.setCreateDateTime(source.getCreateDateTime());
         target.setCreator(source.getCreator());

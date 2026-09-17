@@ -133,6 +133,8 @@
             recurrenceMessage = "The recurring appointment operation failed. No changes were saved. Please try again.";
         }
     }
+    String selectedUnit = request.getParameter("everyUnit");
+    String selectedInterval = request.getParameter("everyNum");
     String selectedEnd = request.getParameter("endDate");
     if (selectedEnd == null) {
         try {
@@ -236,40 +238,40 @@
                             <%
                                 for (int i = 1; i < 12; i++) {
                             %>
-                            <option value="<%=i%>" <%= String.valueOf(i).equals(request.getParameter("everyNum")) ? "selected" : "" %>><%=i%></option>
+                            <option value="<%=i%>" <%= String.valueOf(i).equals(selectedInterval) ? "selected" : "" %>><%=i%></option>
                             <%
                                 }
                             %>
                         </select>
                         <input type="hidden" name="everyUnit" id="everyUnit"
                                class="form-control form-control-sm" style="width: 8rem;"
-                               value="<%= SafeEncode.forHtmlAttribute(request.getParameter("everyUnit") == null ? "day" : request.getParameter("everyUnit")) %>" readonly>
+                               value="<%= SafeEncode.forHtmlAttribute(selectedUnit == null ? "day" : selectedUnit) %>" readonly>
 
                         </div>
                         <div class="form-check form-check-inline">
                             <input class="form-check-input" type="radio" name="dateUnit" id="dateUnitDay"
-                                   value="day" <%= request.getParameter("everyUnit") == null || "day".equals(request.getParameter("everyUnit")) ? "checked" : "" %> onclick='onCheck(this, "day")'>
+                                   value="day" <%= selectedUnit == null || "day".equals(selectedUnit) ? "checked" : "" %> onclick='onCheck(this, "day")'>
                             <label class="form-check-label" for="dateUnitDay">
                                 <fmt:message key="day"/>
                             </label>
                         </div>
                         <div class="form-check form-check-inline">
                             <input class="form-check-input" type="radio" name="dateUnit" id="dateUnitWeek"
-                                   value="week" <%= "week".equals(request.getParameter("everyUnit")) ? "checked" : "" %> onclick='onCheck(this, "week")'>
+                                   value="week" <%= "week".equals(selectedUnit) ? "checked" : "" %> onclick='onCheck(this, "week")'>
                             <label class="form-check-label" for="dateUnitWeek">
                                 <fmt:message key="week"/>
                             </label>
                         </div>
                         <div class="form-check form-check-inline">
                             <input class="form-check-input" type="radio" name="dateUnit" id="dateUnitMonth"
-                                   value="month" <%= "month".equals(request.getParameter("everyUnit")) ? "checked" : "" %> onclick='onCheck(this, "month")'>
+                                   value="month" <%= "month".equals(selectedUnit) ? "checked" : "" %> onclick='onCheck(this, "month")'>
                             <label class="form-check-label" for="dateUnitMonth">
                                 <fmt:message key="month"/>
                             </label>
                         </div>
                         <div class="form-check form-check-inline">
                             <input class="form-check-input" type="radio" name="dateUnit" id="dateUnitYear"
-                                   value="year" <%= "year".equals(request.getParameter("everyUnit")) ? "checked" : "" %> onclick='onCheck(this, "year")'>
+                                   value="year" <%= "year".equals(selectedUnit) ? "checked" : "" %> onclick='onCheck(this, "year")'>
                             <label class="form-check-label" for="dateUnitYear">
                                 <fmt:message key="year"/>
                             </label>

@@ -18,6 +18,15 @@ async function main() {
     const daySheet = await login(context, fixture.config, fixture.recorder);
     await fixture.openDaySheet(daySheet);
     const booked = await fixture.bookFromSlot(context, daySheet);
+    // The edit UI has no style/billing controls. Seed only our owned row to
+    // prove opening R neither blocks creation nor erases legacy metadata.
+    fixture.sql(`UPDATE appointment SET style='legacy-style',billing='legacy-billing' WHERE appointment_no=${booked.id}`);
+    const assertMetadata = () => {
+      const ids = fixture.stampedAppointments().map((r) => r.id);
+      assert(ids.length > 0, 'no owned appointments for metadata check');
+      assert(fixture.sql(`SELECT COUNT(*) FROM appointment WHERE appointment_no IN (${ids.join(',')}) AND style='legacy-style' AND billing='legacy-billing'`) === String(ids.length),
+        'recurrence cleared style/billing absent from the edit form');
+    };
     const dateAfter = (days) => {
       const date = new Date(`${fixture.targetDate}T12:00:00Z`);
       date.setUTCDate(date.getUTCDate() + days);
@@ -64,6 +73,7 @@ async function main() {
       && r.startTime === booked.startTime && r.endTime === booked.endTime && r.notes === booked.notes
       && r.reason === booked.reason), 'created repeats lost appointment fields');
 
+    assertMetadata();
     page = await recurrence(dateAfter(14));
     await submit(page, 'Create repeats', /^No appointments created: repeats already exist/);
     assert(fixture.stampedAppointments().length === 3, 'repeated creation duplicated appointments');
@@ -73,6 +83,7 @@ async function main() {
     page = await recurrence(dateAfter(14), reason);
     await submit(page, 'Recurring Update', /^3 appointment\(s\) updated\.$/);
     assert(fixture.stampedAppointments().every((r) => r.reason === reason), 'update missed a recurrence');
+    assertMetadata();
     await page.close();
 
     page = await recurrence(dateAfter(14));

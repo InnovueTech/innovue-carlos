@@ -101,6 +101,55 @@ class RecurringAppointmentServiceIntegrationTest extends CarlosTestBase {
         assertThat(count.intValue()).isEqualTo(9);
     }
 
+    @Test void preservesUnsubmittedStyleAndBillingWhenCreatingSavedRepeats() {
+        values.put("endDate", "31/01/2027");
+        values.put("style", "legacy-style");
+        values.put("billing", "legacy-billing");
+        service.apply(user, values, 10016);
+        values.put("appointment_no", rows().getFirst().getId().toString());
+        values.put("endDate", "14/02/2027");
+        values.remove("style");
+        values.remove("billing");
+        assertThat(service.apply(user, values, 10016)).isEqualTo(2);
+        em.flush();
+        em.clear();
+        assertThat(rows()).allSatisfy(a -> {
+            assertThat(a.getStyle()).isEqualTo("legacy-style");
+            assertThat(a.getBilling()).isEqualTo("legacy-billing");
+        });
+    }
+
+    @Test void updatesPreserveEachOccurrencesUnsubmittedMetadataButAllowExplicitClearing() {
+        service.apply(user, values, 10016);
+        List<Appointment> series = rows();
+        for (int i = 0; i < series.size(); i++) {
+            series.get(i).setStyle("style-" + i);
+            series.get(i).setBilling("billing-" + i);
+        }
+        em.flush();
+        values.put("appointment_no", series.getFirst().getId().toString());
+        values.put("groupappt", "Group Update");
+        values.put("reason", "updated reason");
+        assertThat(service.apply(user, values, 10016)).isEqualTo(3);
+        em.flush();
+        em.clear();
+        series = rows();
+        for (int i = 0; i < series.size(); i++) {
+            assertThat(series.get(i).getStyle()).isEqualTo("style-" + i);
+            assertThat(series.get(i).getBilling()).isEqualTo("billing-" + i);
+            assertThat(series.get(i).getReason()).isEqualTo("updated reason");
+        }
+        values.put("style", "");
+        values.put("billing", "");
+        assertThat(service.apply(user, values, 10016)).isEqualTo(3);
+        em.flush();
+        em.clear();
+        assertThat(rows()).allSatisfy(a -> {
+            assertThat(a.getStyle()).isEmpty();
+            assertThat(a.getBilling()).isEmpty();
+        });
+    }
+
     @Test void doesNotIgnoreUnsavedChangesOrInvalidEndDate() {
         service.apply(user, values, 10016);
         values.put("appointment_no", rows().getFirst().getId().toString());
