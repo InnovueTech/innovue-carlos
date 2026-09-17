@@ -103,8 +103,8 @@ class RecurringAppointmentServiceIntegrationTest extends CarlosTestBase {
 
     @Test void preservesUnsubmittedStyleAndBillingWhenCreatingSavedRepeats() {
         values.put("endDate", "31/01/2027");
-        values.put("style", "legacy-style");
-        values.put("billing", "legacy-billing");
+        values.put("style", "legacy");
+        values.put("billing", "BILL");
         service.apply(user, values, 10016);
         values.put("appointment_no", rows().getFirst().getId().toString());
         values.put("endDate", "14/02/2027");
@@ -114,8 +114,8 @@ class RecurringAppointmentServiceIntegrationTest extends CarlosTestBase {
         em.flush();
         em.clear();
         assertThat(rows()).allSatisfy(a -> {
-            assertThat(a.getStyle()).isEqualTo("legacy-style");
-            assertThat(a.getBilling()).isEqualTo("legacy-billing");
+            assertThat(a.getStyle()).isEqualTo("legacy");
+            assertThat(a.getBilling()).isEqualTo("BILL");
         });
     }
 

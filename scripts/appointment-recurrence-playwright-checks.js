@@ -20,13 +20,14 @@ async function main() {
     const booked = await fixture.bookFromSlot(context, daySheet);
     // The edit UI has no style/billing controls. Seed only our owned row to
     // prove opening R neither blocks creation nor erases legacy metadata.
-    fixture.sql(`UPDATE appointment SET style='legacy-style',billing='legacy-billing' WHERE appointment_no=${booked.id}`);
+    fixture.sql(`UPDATE appointment SET style='legacy',billing='BILL' WHERE appointment_no=${booked.id}`);
     const assertMetadata = () => {
       const ids = fixture.stampedAppointments().map((r) => r.id);
       assert(ids.length > 0, 'no owned appointments for metadata check');
-      assert(fixture.sql(`SELECT COUNT(*) FROM appointment WHERE appointment_no IN (${ids.join(',')}) AND style='legacy-style' AND billing='legacy-billing'`) === String(ids.length),
+      assert(fixture.sql(`SELECT COUNT(*) FROM appointment WHERE appointment_no IN (${ids.join(',')}) AND style='legacy' AND billing='BILL'`) === String(ids.length),
         'recurrence cleared style/billing absent from the edit form');
     };
+    assertMetadata();
     const dateAfter = (days) => {
       const date = new Date(`${fixture.targetDate}T12:00:00Z`);
       date.setUTCDate(date.getUTCDate() + days);
