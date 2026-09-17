@@ -195,7 +195,7 @@
             }
         </script>
         <% } else { %>
-        <p><fmt:message key="appointment.recurrence.guidance"/></p>
+        <p><fmt:message key='<%= bEdit ? "appointment.recurrence.guidance" : "appointment.recurrence.newGuidance" %>'/></p>
 
         <div id="jsAlertBanner"
              class="alert alert-danger alert-dismissible"
