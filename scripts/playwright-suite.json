@@ -156,6 +156,23 @@
       ]
     },
     {
+      "name": "appointment-recurrence",
+      "script": "scripts/appointment-recurrence-playwright-checks.js",
+      "tiers": [
+        "core"
+      ],
+      "assertsDatabase": true,
+      "provinces": [
+        "all"
+      ],
+      "timeoutSec": 360,
+      "env": [
+        "APPOINTMENT_DAYS_AHEAD",
+        "APPOINTMENT_DEMOGRAPHIC_NO",
+        "APPOINTMENT_PROVIDER_NO"
+      ]
+    },
+    {
       "name": "assign-role",
       "script": "scripts/assign-role-playwright-checks.js",
       "tiers": [

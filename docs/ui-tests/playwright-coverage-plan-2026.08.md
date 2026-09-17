@@ -119,7 +119,7 @@ Items outside that implementation table remain planned.
 | `scripts/lib/playwright-harness.js` | The shared harness: `readConfig`, `createSqlRunner`, `login` (forced reset, facility select, and the MFA challenge **when the caller supplies an `mfaCode` callback** — the harness generates no OTP itself, and no check passes one today, so an MFA-enrolled account is refused with an assertion rather than logged in; `login-mfa` in §2.2 is what closes that), `wireStrictPage` / `assertStrictPage`, `runCheck`, the TLS gate, `SkipCheck` | `scripts/playwright-harness.test.js` (18 tests), run by `script-regressions.yml` |
 | `scripts/lib/playwright-ui.js` | The JavaScript-path helpers (`clickOpensPopup`, `clickInjectsPanel`, `expectOpenerRefresh`, `typeAutocomplete`, `pickDate`, `dataTableRows`, `pressShortcut`, `csrfTokenPresent`, `expectDialog`) and the `NAVIGATION` click map | `scripts/playwright-suite-manifest.test.js` |
 | `scripts/lib/console-baseline.json` | The suite-wide, issue-keyed allow-list that replaces per-check `allow` arrays | a test asserts every entry names where its removal is tracked |
-| `scripts/playwright-suite.json` | The manifest: 111 named check entries over 102 scripts (the table-driven families — `surface-audit`, `direct-response-contract` — are one script backing several named checks, selected by `envSet`), each with tier, province, timeout, database use and env knobs | a test fails the build if a check has no entry, or an entry no script |
+| `scripts/playwright-suite.json` | The manifest: 112 named check entries over 103 scripts (the table-driven families — `surface-audit`, `direct-response-contract` — are one script backing several named checks, selected by `envSet`), each with tier, province, timeout, database use and env knobs | a test fails the build if a check has no entry, or an entry no script |
 | `scripts/run-playwright-suite.js` | The runner: `--tier`, `--only`, `--skip`, `--province`, `--junit`, `--list`, `--dry-run` | `scripts/playwright-suite-manifest.test.js` |
 | `package.json` | `test:playwright`, `test:playwright-smoke`, `test:playwright-list`, plus the 8 checks that had no alias at all | a test asserts every manifest entry is reachable by an alias |
 
@@ -715,3 +715,5 @@ shared helper.
 | assert the opener refresh contract | 10 |
 | press a keyboard shortcut | 3 |
 | call a page function from `page.evaluate` as the path | 2 |
+
+`appointment-recurrence` drives saved appointment → R → Create repeats, invalid-date correction, repeated submission, Recurring Update/Cancel/Delete and per-occurrence archives. It reuses the existing UI booking fixture, checks exact dates and persisted fields, and removes only its own rows. Run `npm run test:appointment-recurrence-playwright` against an isolated demo database.
