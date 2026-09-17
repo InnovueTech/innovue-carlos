@@ -30,9 +30,9 @@ async function main() {
         await dialog.accept();
       });
       if (changedReason) await edit.locator('#reason').fill(changedReason);
-      await edit.locator('#repeatButton').click();
-      await edit.locator('#endDate').waitFor({ state: 'visible', timeout: 30000 });
+      await Promise.all([edit.waitForEvent('domcontentloaded'), edit.locator('#repeatButton').click()]);
       await assertNotErrorPage(edit, 'recurrence form');
+      await edit.locator('#endDate').waitFor({ state: 'visible', timeout: 30000 });
       await pickDate(edit, edit.locator('#endDate'), end);
       await edit.locator('#dateUnitWeek').check();
       return edit;
@@ -98,7 +98,8 @@ async function main() {
     await block.locator('#keyword').fill(`${fixture.stamp}_blocked_time`);
     await block.locator('#reason').fill(`${fixture.stamp}_blocked_reason`);
     await block.locator('textarea[name="notes"]').fill(`${fixture.stamp}_blocked_notes`);
-    await block.locator('#apptRepeatButton').click();
+    await Promise.all([block.waitForEvent('domcontentloaded'), block.locator('#apptRepeatButton').click()]);
+    await assertNotErrorPage(block, 'new-booking recurrence form');
     await block.locator('#endDate').waitFor({ state: 'visible', timeout: 30000 });
     await pickDate(block, block.locator('#endDate'), dateAfter(14));
     await block.locator('#dateUnitWeek').check();

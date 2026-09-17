@@ -92,7 +92,7 @@
     boolean authed = true;
     boolean bEdit = request.getParameter("appointment_no") != null && !request.getParameter("appointment_no").isBlank();
 %>
-<security:oscarSec roleName="<%=roleName$%>" objectName="_appointment" rights="<%= bEdit ? "u" : "w" %>" reverse="<%=true%>">
+<security:oscarSec roleName="<%=roleName$%>" objectName="_appointment" rights='<%= bEdit ? "u" : "w" %>' reverse="<%=true%>">
     <%authed = false; %>
     <%response.sendRedirect(request.getContextPath() + "/securityError?type=_appointment");%>
 </security:oscarSec>
