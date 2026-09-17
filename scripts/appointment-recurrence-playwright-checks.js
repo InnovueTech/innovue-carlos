@@ -87,6 +87,26 @@ async function main() {
     const archives = fixture.stampedArchiveRows();
     assert(ids.every((id) => archives.filter((row) => row.id === id).length >= 3), 'an occurrence was updated/cancelled/deleted without an archive');
     await page.close();
+    // The new-booking R route shares the same validation and transaction. A
+    // blocked-time booking deliberately has no selected demographic.
+    await fixture.openDaySheet(daySheet);
+    const pending = context.waitForEvent('page', { timeout: 45000 });
+    await daySheet.locator(`a.adhour[onclick*="provider_no=${booked.provider}&"]`).first().click();
+    const block = await pending;
+    wirePage(block, 'recurring-block', fixture.recorder);
+    await block.waitForLoadState('domcontentloaded');
+    await block.locator('#keyword').fill(`${fixture.stamp}_blocked_time`);
+    await block.locator('#reason').fill(`${fixture.stamp}_blocked_reason`);
+    await block.locator('textarea[name="notes"]').fill(`${fixture.stamp}_blocked_notes`);
+    await block.locator('#apptRepeatButton').click();
+    await block.locator('#endDate').waitFor({ state: 'visible', timeout: 30000 });
+    await pickDate(block, block.locator('#endDate'), dateAfter(14));
+    await block.locator('#dateUnitWeek').check();
+    await submit(block, 'Create repeats', /^3 appointment\(s\) created\.$/);
+    const blocks = fixture.stampedAppointments();
+    assert(blocks.length === 3 && blocks.every((r) => r.demographic === '0'), 'non-patient repeats lost blocked-time semantics');
+    assert(JSON.stringify(blocks.map((r) => r.date).sort()) === JSON.stringify(expectedDates), 'new-booking repeats have wrong dates');
+    await block.close();
     assertNoPageErrors(fixture.recorder);
     assert(fixture.recorder.badResponses.length === 0, 'recurrence workflow had HTTP failures');
     assert(fixture.recorder.consoleIssues.length === 0, 'recurrence workflow had console failures');

@@ -117,6 +117,26 @@ class RecurringAppointmentServiceIntegrationTest extends CarlosTestBase {
         assertThat(rows()).isEmpty();
     }
 
+    @Test void preservesNonPatientBookingsAndTextProviderIdentifiers() {
+        values.put("demographic_no", "");
+        values.put("provider_no", "LOCUM");
+        assertThat(service.apply(user, values, 10016)).isEqualTo(3);
+        assertThat(rows()).allSatisfy(a -> {
+            assertThat(a.getDemographicNo()).isZero();
+            assertThat(a.getProviderNo()).isEqualTo("LOCUM");
+        });
+    }
+
+    @Test void managementBoundsActualMembersInsteadOfAnUnusedDailyPattern() {
+        service.apply(user, values, 10016);
+        values.put("appointment_no", rows().getFirst().getId().toString());
+        values.put("everyUnit", "day");
+        values.put("endDate", "31/01/2030");
+        values.put("groupappt", "Group Cancel");
+        assertThat(service.apply(user, values, 10016)).isEqualTo(3);
+        assertThat(rows()).allSatisfy(a -> assertThat(a.getStatus()).isEqualTo("C"));
+    }
+
     @Test void managesLegacyMonthEndSeriesWithoutMissingDriftedDates() {
         values.put("everyUnit", "month");
         values.put("endDate", "31/03/2027");
@@ -131,7 +151,13 @@ class RecurringAppointmentServiceIntegrationTest extends CarlosTestBase {
         assertThat(rows()).allSatisfy(a -> assertThat(a.getStatus()).isEqualTo("C"));
     }
 
+    @Test void preservesWriteOnlyAccessForNewRecurringBookings() {
+        when(security.hasPrivilege(eq(user), eq("_appointment"), eq("u"), isNull())).thenReturn(false);
+        assertThat(service.apply(user, values, 10016)).isEqualTo(3);
+    }
+
     @Test void requiresAppointmentPrivileges() {
+        values.put("groupappt", "Group Update");
         when(security.hasPrivilege(eq(user), eq("_appointment"), eq("u"), isNull())).thenReturn(false);
         assertThatThrownBy(() -> service.apply(user, values, 10016)).isInstanceOf(SecurityException.class);
         assertThat(rows()).isEmpty();

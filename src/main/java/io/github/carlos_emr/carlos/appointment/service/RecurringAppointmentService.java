@@ -38,8 +38,11 @@ public class RecurringAppointmentService {
     /** All validation and series discovery precede writes; a failure rolls back the entire operation. */
     @Transactional
     public int apply(LoggedInInfo user, Map<String, String> values, int programId) {
+        String requestedId = values.get("appointment_no");
+        boolean editsExisting = !"Add Group Appointment".equals(values.get("groupappt"))
+                || (requestedId != null && !requestedId.isBlank());
         if (user == null || !security.hasPrivilege(user, "_appointment", "w", null)
-                || !security.hasPrivilege(user, "_appointment", "u", null)) {
+                || (editsExisting && !security.hasPrivilege(user, "_appointment", "u", null))) {
             throw new SecurityException("missing required appointment privileges");
         }
         String operation = values.getOrDefault("groupappt", "");
@@ -55,9 +58,11 @@ public class RecurringAppointmentService {
         } catch (DateTimeParseException ex) {
             throw new IllegalArgumentException("Choose a valid end date (dd/mm/yyyy).");
         }
-        List<LocalDate> dates = RecurrenceDates.between(start, end,
-                number(values.get("everyNum"), "repeat interval"), values.getOrDefault("everyUnit", ""));
         boolean adding = operation.equals("Add Group Appointment");
+        int interval = number(values.get("everyNum"), "repeat interval");
+        String unit = values.getOrDefault("everyUnit", "");
+        RecurrenceDates.validateRange(start, end, interval, unit);
+        List<LocalDate> dates = adding ? RecurrenceDates.between(start, end, interval, unit) : List.of();
         String id = values.get("appointment_no");
         Appointment anchor = id == null || id.isBlank() ? null
                 : appointments.findForUpdate(number(id, "appointment number"));
@@ -127,9 +132,10 @@ public class RecurringAppointmentService {
             throw new IllegalArgumentException("The appointment must end on the same day, after it starts.");
         }
         String provider = v.getOrDefault("provider_no", "");
-        if (!provider.matches("[0-9]+")) throw new IllegalArgumentException("Choose an appointment provider.");
+        if (provider.isBlank()) throw new IllegalArgumentException("Choose an appointment provider.");
         a.setProviderNo(provider);
-        a.setDemographicNo(number(v.getOrDefault("demographic_no", "0"), "patient number"));
+        String demographic = v.getOrDefault("demographic_no", "");
+        a.setDemographicNo(demographic.isBlank() ? 0 : number(demographic, "patient number"));
         a.setProgramId(programId);
         a.setName(v.getOrDefault("keyword", ""));
         a.setNotes(v.getOrDefault("notes", ""));

@@ -90,8 +90,9 @@
 <%
     String roleName$ = (String) session.getAttribute("userrole") + "," + (String) session.getAttribute("user");
     boolean authed = true;
+    boolean bEdit = request.getParameter("appointment_no") != null && !request.getParameter("appointment_no").isBlank();
 %>
-<security:oscarSec roleName="<%=roleName$%>" objectName="_appointment" rights="u" reverse="<%=true%>">
+<security:oscarSec roleName="<%=roleName$%>" objectName="_appointment" rights="<%= bEdit ? "u" : "w" %>" reverse="<%=true%>">
     <%authed = false; %>
     <%response.sendRedirect(request.getContextPath() + "/securityError?type=_appointment");%>
 </security:oscarSec>
@@ -103,7 +104,6 @@
 
 <%
     if (session.getAttribute("user") == null) response.sendRedirect(request.getContextPath() + "/logoutPage");
-    boolean bEdit = request.getParameter("appointment_no") != null;
 %>
 
 <%
