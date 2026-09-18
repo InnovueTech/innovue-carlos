@@ -718,3 +718,5 @@ shared helper.
 | assert the opener refresh contract | 10 |
 | press a keyboard shortcut | 3 |
 | call a page function from `page.evaluate` as the path | 2 |
+
+`appointment-recurrence` drives saved appointment → R → Create repeats, invalid-date correction, repeated submission, Recurring Update/Cancel/Delete and per-occurrence archives. It reuses the existing UI booking fixture, checks exact dates and persisted fields, and removes only its own rows. Run `npm run test:appointment-recurrence-playwright` against an isolated demo database.
