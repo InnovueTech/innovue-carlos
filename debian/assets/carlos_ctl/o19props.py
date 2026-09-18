@@ -524,7 +524,7 @@ def render_fragment(result: dict) -> str:
     lines = [
         "# Derived from the clinic's oscar.properties by carlos-ctl "
         "import-o19 (experimental).",
-        "# REVIEW before applying: append the lines you approve to "
+        "# REVIEW before applying: append the lines you approve to ",
         "/etc/carlos-emr/carlos.properties",
         "# and run `carlos-ctl restart`. Never applied automatically.",
         "# Generated: " + time.strftime("%Y-%m-%d %H:%M:%S"),
