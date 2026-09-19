@@ -36,6 +36,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.InvocationTargetException;
@@ -43,11 +45,10 @@ import java.lang.reflect.Method;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.UUID;
 
 import jakarta.servlet.ServletContext;
@@ -66,6 +67,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.MockedStatic;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @Tag("unit")
@@ -151,24 +153,34 @@ class NioFileManagerImplUnitTest extends CarlosUnitTestBase {
         }
     }
 
-    @Test
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     @DisplayName("Failed streamed temp copy removes its private directory")
-    void shouldRemoveTempDirectory_whenStreamedCopyFails() throws IOException {
+    void shouldRemoveTempDirectory_whenStreamedCopyFails(boolean partialFileCreated) throws IOException {
         Path applicationRoot = Path.of(System.getProperty("java.io.tmpdir"),
                 PathValidationUtils.APPLICATION_TEMP_ROOT_NAME);
-        Files.createDirectories(applicationRoot);
-        Set<Path> before;
-        try (Stream<Path> entries = Files.list(applicationRoot)) {
-            before = entries.collect(Collectors.toSet());
-        }
-
+        Path copyDirectory = Files.createDirectory(tempDir.resolve("failed-copy"));
+        Path destination = copyDirectory.resolve("clinical-document.pdf");
         Path missingSource = tempDir.resolve("missing-clinical-document.pdf");
-        assertThatThrownBy(() -> nioFileManager.createTempFileFrom("clinical-document.pdf", missingSource))
-                .isInstanceOf(IOException.class);
+        IOException copyFailure = new IOException("Synthetic streamed-copy failure");
 
-        try (Stream<Path> entries = Files.list(applicationRoot)) {
-            assertThat(entries.collect(Collectors.toSet())).isEqualTo(before);
+        // Inspect only the directory owned by this invocation. Other tests and JVM forks
+        // legitimately create/remove entries in the shared carlos-temp root concurrently.
+        try (MockedStatic<Files> files = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            files.when(() -> Files.createTempDirectory(eq(applicationRoot), anyString()))
+                    .thenReturn(copyDirectory);
+            files.when(() -> Files.copy(missingSource, destination, StandardCopyOption.REPLACE_EXISTING))
+                    .thenAnswer(invocation -> {
+                        if (partialFileCreated) {
+                            Files.writeString(destination, "Synthetic partial document");
+                        }
+                        throw copyFailure;
+                    });
+            assertThatThrownBy(() -> nioFileManager.createTempFileFrom("clinical-document.pdf", missingSource))
+                    .isSameAs(copyFailure);
         }
+        assertThat(destination).doesNotExist();
+        assertThat(copyDirectory).doesNotExist();
     }
 
     @Test
