@@ -153,7 +153,7 @@ class NioFileManagerImplUnitTest extends CarlosUnitTestBase {
 
     @Test
     @DisplayName("Failed streamed temp copy removes its private directory")
-    void shouldRemoveTempDirectoryWhenStreamedCopyFails() throws IOException {
+    void shouldRemoveTempDirectory_whenStreamedCopyFails() throws IOException {
         Path applicationRoot = Path.of(System.getProperty("java.io.tmpdir"),
                 PathValidationUtils.APPLICATION_TEMP_ROOT_NAME);
         Files.createDirectories(applicationRoot);

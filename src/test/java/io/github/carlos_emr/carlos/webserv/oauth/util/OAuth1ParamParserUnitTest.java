@@ -20,7 +20,8 @@ class OAuth1ParamParserUnitTest {
             "application/json, false",
             "'application/x-www-form-urlencoded invalid', false"
     })
-    void includesBodyParametersOnlyForExactFormMediaType(String contentType, boolean includeBody) {
+    void shouldHonorExactFormMediaType_whenIncludingBodyParameters(
+            String contentType, boolean includeBody) {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/oauth");
         request.addHeader("Authorization", "OAuth oauth_consumer_key=consumer,oauth_signature=signature,"
                 + "oauth_signature_method=HMAC-SHA1,oauth_timestamp=1,oauth_nonce=nonce");
